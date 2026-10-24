@@ -1,3 +1,0 @@
-{"name":"donutpay","version":"1.0.0","private":true,"type":"module","engines":{"node":">=20"},
-"scripts":{"start":"node server.js","make-admin":"node scripts/make-admin.js"},
-"dependencies":{"bcryptjs":"^2.4.3","cookie-parser":"^1.4.6","express":"^4.19.2","express-rate-limit":"^7.4.0","helmet":"^7.1.0","jsonwebtoken":"^9.0.2","pg":"^8.12.0"}}
