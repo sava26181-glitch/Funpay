@@ -1,6 +1,6 @@
 import express from "express"; import helmet from "helmet"; import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit"; import bcrypt from "bcryptjs"; import jwt from "jsonwebtoken";
-import pg from "pg"; import fs from "fs"; import path from "path"; import { fileURLToPath } from "url";
+import pg from "pg"; import routes2 from "./routes2.js"; import fs from "fs"; import path from "path"; import { fileURLToPath } from "url";
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const { DATABASE_URL, JWT_SECRET, NODE_ENV } = process.env;
 if (!DATABASE_URL || !JWT_SECRET) { console.error("DATABASE_URL and JWT_SECRET are required"); process.exit(1); }
@@ -10,6 +10,7 @@ const q = (t, p) => pool.query(t, p).then(r => r.rows);
 const E = (s, m) => Object.assign(new Error(m), { status: s });
 const tx = async f => { const c = await pool.connect(); try { await c.query("begin"); const r = await f(c); await c.query("commit"); return r; } catch (e) { await c.query("rollback"); throw e; } finally { c.release(); } };
 await pool.query(fs.readFileSync(path.join(dir, "schema.sql"), "utf8"));
+await pool.query(fs.readFileSync(path.join(dir, "schema_v2.sql"), "utf8"));
 
 const app = express(); app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], fontSrc: ["https://fonts.gstatic.com"], scriptSrc: ["'self'", "'unsafe-inline'"], scriptSrcAttr: ["'unsafe-inline'"], imgSrc: ["'self'", "data:"], connectSrc: ["'self'"] } } }));
@@ -18,10 +19,11 @@ app.get("/health", (_, r) => r.send("ok"));
 const wrap = f => (req, res, next) => Promise.resolve(f(req, res, next)).catch(next);
 app.use((req, _r, next) => { try { req.user = jwt.verify(req.cookies.t, JWT_SECRET); } catch {} next(); });
 const need = (req, res, next) => req.user ? next() : res.status(401).json({ error: "auth required" });
-const admin = wrap(async (req, res, next) => { const [u] = await q("select role from users where id=$1", [req.user.id]); u?.role === "admin" ? next() : res.status(403).json({ error: "forbidden" }); });
+const admin = wrap(async (req, res, next) => { const [u] = await q("select role from users where id=$1", [req.user.id]); ["admin", "owner"].includes(u?.role) ? next() : res.status(403).json({ error: "forbidden" }); });
 const setCookie = (res, id) => res.cookie("t", jwt.sign({ id }, JWT_SECRET, { expiresIn: "7d" }), { httpOnly: true, sameSite: "lax", secure: prod, maxAge: 7 * 864e5 });
 const lim = rateLimit({ windowMs: 15 * 60e3, limit: 30 });
-const U = "id,username,email,role,is_seller,avatar_url,bio";
+const U = "id,username,email,role,is_seller,avatar_url,bio,seller_verified,avatar_media,cover_media,theme";
+routes2(app, { q, pool, tx, E, wrap, need });
 
 // ---- auth / profile
 app.post("/api/auth/register", lim, wrap(async (req, res) => {
@@ -33,6 +35,7 @@ app.post("/api/auth/register", lim, wrap(async (req, res) => {
 app.post("/api/auth/login", lim, wrap(async (req, res) => {
   const { email, password } = req.body || {};
   const [u] = await q("select * from users where email=$1", [String(email || "").toLowerCase()]);
+  if (u?.blocked_until && new Date(u.blocked_until) > new Date()) throw E(403, "account blocked");
   if (!u || !(await bcrypt.compare(String(password || ""), u.password_hash))) throw E(401, "wrong email or password");
   setCookie(res, u.id); const { password_hash, ...pub } = u; res.json(pub);
 }));
@@ -48,7 +51,7 @@ app.patch("/api/me", need, wrap(async (req, res) => {
 // ---- catalog
 app.get("/api/games", wrap(async (_, res) => res.json(await q("select slug,name,platform from games where is_active order by name"))));
 app.get("/api/categories", wrap(async (_, res) => res.json(await q("select slug,name from categories order by name"))));
-const LCOLS = "l.id,l.title,l.summary,l.price_cents,l.currency,l.stock,l.delivery_time,l.created_at,g.slug game,g.name game_name,c.slug category,c.name category_name,u.username seller,u.avatar_url,r.avg rating,coalesce(r.cnt,0)::int reviews";
+const LCOLS = "l.id,l.title,l.summary,l.price_cents,l.currency,l.stock,l.delivery_time,l.created_at,g.slug game,g.name game_name,c.slug category,c.name category_name,u.username seller,u.avatar_url,u.avatar_media,u.seller_verified,r.avg rating,coalesce(r.cnt,0)::int reviews";
 const LFROM = "from listings l join games g on g.id=l.game_id join categories c on c.id=l.category_id join users u on u.id=l.seller_id left join (select seller_id,round(avg(rating),2) avg,count(*) cnt from reviews group by seller_id) r on r.seller_id=l.seller_id";
 app.get("/api/listings", wrap(async (req, res) => {
   const { game, category, min, max, q: s, seller, sort, offset } = req.query, w = ["l.status='active'"], p = [];
@@ -60,7 +63,7 @@ app.get("/api/listings", wrap(async (req, res) => {
   res.json(await q(`select ${LCOLS} ${LFROM} where ${w.join(" and ")} order by ${ord} limit 50 offset ${Math.max(0, +offset || 0)}`, p));
 }));
 app.get("/api/listings/:id", wrap(async (req, res) => {
-  const [l] = await q(`select ${LCOLS},l.details,l.seller_id,l.status ${LFROM} where l.id=$1 and (l.status='active' or l.seller_id=$2)`, [req.params.id, req.user?.id || null]);
+  const [l] = await q(`select ${LCOLS},l.details,l.attrs,l.image_media,l.seller_id,l.status ${LFROM} where l.id=$1 and (l.status='active' or l.seller_id=$2)`, [req.params.id, req.user?.id || null]);
   if (!l) throw E(404, "not found"); res.json(l);
 }));
 app.get("/api/my/listings", need, wrap(async (req, res) => res.json(await q(`select ${LCOLS},l.status ${LFROM} where l.seller_id=$1 order by l.created_at desc`, [req.user.id]))));
@@ -70,10 +73,13 @@ const lbody = b => {
   return [b.title, (b.summary || "").slice(0, 300), (b.details || "").slice(0, 3000), price, stock, (b.delivery_time || "").slice(0, 40)];
 };
 app.post("/api/listings", need, wrap(async (req, res) => {
-  const [me] = await q("select is_seller from users where id=$1", [req.user.id]); if (!me?.is_seller) throw E(403, "become a seller first");
+  const [me] = await q("select is_seller,seller_verified from users where id=$1", [req.user.id]); if (!me?.is_seller) throw E(403, "become a seller first");
+  if (process.env.REQUIRE_SELLER_VERIFICATION !== "false" && !me.seller_verified) throw E(403, "seller verification required");
   const [g] = await q("select id from games where slug=$1", [req.body.game]), [c] = await q("select id from categories where slug=$1", [req.body.category]);
   if (!g || !c) throw E(400, "unknown game or category");
-  const [l] = await q("insert into listings(seller_id,game_id,category_id,title,summary,details,price_cents,stock,delivery_time,status) values($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending') returning id,status", [req.user.id, g.id, c.id, ...lbody(req.body)]);
+  const attrs = Object.fromEntries(Object.entries(req.body.attrs || {}).filter(([k, v]) => /^[a-z_]{1,30}$/.test(k) && !/pass|pwd|token|secret|key/i.test(k) && ["string", "number"].includes(typeof v)).slice(0, 12).map(([k, v]) => [k, String(v).slice(0, 200)]));
+  let img = null; if (req.body.image) { const [m] = await q("select id from media where id=$1 and owner_id=$2 and kind='listing'", [req.body.image, req.user.id]); if (!m) throw E(400, "bad image"); img = m.id; }
+  const [l] = await q("insert into listings(seller_id,game_id,category_id,title,summary,details,price_cents,stock,delivery_time,status,attrs,image_media) values($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11) returning id,status", [req.user.id, g.id, c.id, ...lbody(req.body), attrs, img]);
   res.status(201).json(l);
 }));
 app.patch("/api/listings/:id", need, wrap(async (req, res) => {
