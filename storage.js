@@ -1,7 +1,7 @@
 // Клиент Supabase Storage (REST). Service role key используется только на сервере.
 export function makeStorage(env, dbUrl = "") {
   const ref = (dbUrl.match(/postgres\.([a-z0-9]+)[:@]/) || [])[1];
-  const URL_ = (env.SUPABASE_URL || (ref ? `https://${ref}.supabase.co` : "")).replace(/\/$/, ""), KEY = env.SUPABASE_SERVICE_ROLE_KEY;
+  const URL_ = (env.SB_URL || env.SUPABASE_URL || (ref ? `https://${ref}.supabase.co` : "")).replace(/\/$/, ""), KEY = env.SB_KEY || env.SUPABASE_SERVICE_ROLE_KEY;
   const PUB = env.SUPABASE_PUBLIC_BUCKET || "donutpay-public", PRIV = env.SUPABASE_PRIVATE_BUCKET || "donutpay-private";
   const on = !!(URL_ && KEY), h = x => String(KEY || "").startsWith("sb_") ? { apikey: KEY, ...x } : { Authorization: `Bearer ${KEY}`, apikey: KEY, ...x };
   const fail = async (what, r) => { const t = (await r.text().catch(() => "")).slice(0, 200); return new Error(`${what}: HTTP ${r.status} ${t}`); };
