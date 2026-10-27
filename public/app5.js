@@ -35,8 +35,7 @@ function otTimeline(o, ms) {
   const items = ms.filter(m => (m.kind !== "system" && m.kind !== "auto") || m.order_id === o.id).map(m => {
     if (m.kind === "system") return `<div class="ots"><div class="otn"><b>Система</b><span class="tag">оповещение</span><small class="m">${odt(m.created_at)}</small></div><div class="otb"><i>i</i><p>${esc(m.body)}</p></div></div>`;
     if (m.kind === "auto") return autoBub(m);
-    const mine = m.sender_id === ME.id, nm = m.sender_name || (m.sender_id === o.buyer_id ? o.buyer_name : o.seller_name);
-    return `<div class="otm"><div class="otn"><b>${esc(nm || "")}</b>${m.kind === "staff" ? '<span class="tag">модератор</span>' : ""}${mine ? '<span class="tag">вы</span>' : ""}<small class="m">${odt(m.created_at)}</small></div><div class="otx">${esc(m.body === "[вложение]" ? "" : m.body).replace(/\n/g, "<br>")}${atts(m.atts)}</div></div>`;
+    return bubx(m);
   });
   return items.join("") || '<p class="m">Сообщений пока нет.</p>';
 }

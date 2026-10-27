@@ -176,9 +176,10 @@ function bubx(m) {
   if (m.kind === "system") return `<div class="fsys" id="m${m.id}"><div class="otn"><b>Система</b><span class="tag">оповещение</span><time>${new Date(m.created_at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</time></div><div class="otb"><i>i</i><p>${ordLink(esc(m.body), m.order_id)}${m.order_id ? ` <a class="lk" onclick="go('/order/${m.order_id}')">Открыть заказ</a>` : ""}</p></div></div>`;
   if (m.kind === "auto") return autoBub(m);
   const mine = m.sender_id === ME.id, c = window.CHA || {}, name = mine ? ME.username : (m.sender_name || c.n || window.CHO || "Собеседник"), stf = m.kind === "staff" ? `<span class="tag">модератор</span>` : "", txt = m.body === "[вложение]" ? "" : esc(m.body), need = !mine && window.TR && TR.lang() && txt;
-  const av = mine ? avs(ME.username, ME.avatar_media, false, ME.theme && ME.theme.avatar_preset) : avs(name, c.m, c.on, c.p);
   const lot = m.lot_title && m.listing_id ? `<a class="lotc" onclick="go('/l/${m.listing_id}')">По лоту: ${esc(m.lot_title)}</a>` : "";
-  return `<div class="fm ${mine ? "me" : ""}" id="m${m.id}" ${need ? `data-tr="${m.id}"` : ""}>${av}<div class="fb"><div class="mh"><b>${esc(name)}</b>${stf}<time>${new Date(m.created_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</time></div>${lot}<div class="bt">${txt}</div>${m.atts && m.atts.length ? `<div class="mat">${atts(m.atts)}</div>` : ""}</div></div>`;
+  const t = new Date(m.created_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }), rd = !!m.read_at;
+  const ck = mine ? `<svg class="ck ${rd ? "rd" : ""}" width="17" height="12" viewBox="0 0 20 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 7.5l4 4L12 3"/>${rd ? '<path d="M8 10.5l1.5 1L17 3"/>' : ""}</svg>` : "";
+  return `<div class="bb ${mine ? "me" : "th"}" id="m${m.id}"><div class="bbi" ${need ? `data-tr="${m.id}"` : ""}>${stf ? `<div class="bsf">Модератор</div>` : ""}${lot}${txt ? `<div class="bt">${txt}</div>` : ""}${m.atts && m.atts.length ? `<div class="mat">${atts(m.atts)}</div>` : ""}<div class="bm"><time>${t}</time>${ck}</div></div></div>`;
 }
 async function msgs(cid) {
   need(); const cs = await api("/conversations"); let ms = [], cur = null, on = null; CC = cid || null;
