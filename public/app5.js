@@ -40,6 +40,19 @@ function otTimeline(o, ms) {
   });
   return items.join("") || '<p class="m">Сообщений пока нет.</p>';
 }
+// ---- отзыв на странице заказа: покупатель оставляет, меняет, удаляет; продавец отвечает
+const stars5 = n => `<span class="st5">${"★".repeat(n)}<i>${"★".repeat(5 - n)}</i></span>`;
+function otReview(o, buyer) {
+  const r = o.review, dt = d => new Date(d).toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" }); window._rv = r || null;
+  if (!r) return buyer ? `<div class="card orv"><b>Отзыв для продавца</b><p class="m" style="margin:6px 0 12px">Оцените сделку: отзыв увидят другие покупатели.</p><button class="btn pri" onclick="revForm('${o.id}')">Оставить отзыв</button></div>` : `<div class="card orv"><b>Отзыв покупателя</b><p class="m" style="margin:6px 0 0">Покупатель пока не оставил отзыв.</p></div>`;
+  const rep = r.reply ? `<div class="rrp"><div class="row bet"><b>Ответ продавца</b><small class="m">${dt(r.reply_at)}</small></div><p>${esc(r.reply).replace(/\n/g, "<br>")}</p>${buyer ? "" : `<div class="row" style="gap:8px"><button class="btn sm" onclick="rplForm('${o.id}')">Изменить ответ</button><button class="btn sm dng" onclick="rplDel('${o.id}')">Удалить ответ</button></div>`}</div>` : (buyer ? "" : `<button class="btn pri" style="margin-top:12px" onclick="rplForm('${o.id}')">Ответить на отзыв</button>`);
+  return `<div class="card orv"><div class="row bet"><b>${buyer ? "Ваш отзыв" : "Отзыв покупателя"}</b><small class="m">${dt(r.created_at)}${r.edited_at ? ", изменён" : ""}</small></div><div style="margin:8px 0 4px;font-size:22px">${stars5(r.rating)}</div>${r.body ? `<p style="margin:0;overflow-wrap:anywhere">${esc(r.body).replace(/\n/g, "<br>")}</p>` : ""}${buyer ? `<div class="row" style="gap:8px;margin-top:12px"><button class="btn sm" onclick="revForm('${o.id}',1)">Изменить</button><button class="btn sm dng" onclick="revDel('${o.id}')">Удалить</button></div>` : ""}${rep}</div>`;
+}
+const RSEL = [[5, "5 — отлично"], [4, "4 — хорошо"], [3, "3 — нормально"], [2, "2 — плохо"], [1, "1 — ужасно"]];
+const revForm = (id, edit) => { const r = edit ? window._rv : null; formM(edit ? "Изменить отзыв" : "Оставить отзыв", [{ k: "r", l: "Оценка", t: "select", o: RSEL, v: r ? r.rating : 5 }, { k: "b", l: "Комментарий (необязательно)", t: "area", max: 1000, v: r ? r.body || "" : "" }], edit ? "Сохранить" : "Отправить", async v => { await api(`/orders/${id}/review`, { method: edit ? "PATCH" : "POST", body: { rating: +v.r, body: v.b.trim() } }); toast(edit ? "Отзыв изменён" : "Отзыв сохранён"); route() }) };
+const revDel = id => ask("Удалить отзыв? Продавец получит уведомление.", "Удалить", act(async () => { await api(`/orders/${id}/review`, { method: "DELETE" }); toast("Отзыв удалён"); route() }));
+const rplForm = id => formM("Ответ на отзыв", [{ k: "b", l: "Ваш ответ покупателю", t: "area", max: 1000, v: window._rv && window._rv.reply || "" }], "Отправить", async v => { if (v.b.trim().length < 2) throw new Error("Напишите ответ"); await api(`/orders/${id}/review/reply`, { method: "POST", body: { body: v.b.trim() } }); toast("Ответ опубликован"); route() });
+const rplDel = id => ask("Удалить ответ на отзыв?", "Удалить", act(async () => { await api(`/orders/${id}/review/reply`, { method: "DELETE" }); toast("Ответ удалён"); route() }));
 async function orderPage(id) {
   need(); const o = await api("/orders/" + id), buyer = o.buyer_id === ME.id || o.partner_id === ME.id, s = o.status;
   const ms = o.conversation_id ? await api(`/conversations/${o.conversation_id}/messages`) : [];
@@ -53,7 +66,6 @@ async function orderPage(id) {
     s === "paid" && !buyer ? `<button class="btn pri" onclick="ost('${o.id}','in_progress')">Приступить к выполнению</button>` : "",
     ["paid", "in_progress"].includes(s) && buyer ? `<button class="btn pri" onclick="ost('${o.id}','completed')">Подтвердить выполнение заказа</button>` : "",
     ["paid", "in_progress", "completed"].includes(s) && o.partner_id !== ME.id ? `<button class="btn dng" onclick="disp('${o.id}')">Открыть спор</button>` : "",
-    s === "completed" && buyer ? `<button class="btn" onclick="rev('${o.id}')">Оставить отзыв продавцу</button>` : "",
   ].filter(Boolean);
   window._ot = { id: o.id, conv: o.conversation_id, lot: o.listing_id, buyer: o.buyer_id, seller: o.seller_id };
   CC = o.conversation_id || null; LID = o.listing_id; clearAtt && clearAtt();
@@ -66,6 +78,7 @@ ${fld("Краткое описание", esc(o.title) + (o.quantity > 1 ? " × "
 <div class="otg">${fld("Открыт", `${odt(opened.created_at)}<br><span class="m">(${ago5(opened.created_at)})</span>`)}${closed ? fld("Закрыт", `${odt(closed.created_at)}<br><span class="m">(${ago5(closed.created_at)})</span>`) : ""}</div>
 <div class="otf"><small>Сумма</small><div class="osum">${rub(o.total_cents)}</div></div>
 ${acts.length ? `<div class="oacts">${acts.join("")}</div>` : ""}
+${s === "completed" && o.partner_id !== ME.id ? otReview(o, buyer) : ""}
 <div class="card otc"><div class="oth">${avs(other || "?", am, otherOn, ap)}<div style="flex:1;min-width:0"><b><a onclick="go('/u/'+encodeURIComponent('${esc(other || "")}'))">${esc(other || "")}</a></b><div class="m">${otherOn ? "Онлайн" : "Был(а) недавно"}</div></div>${o.conversation_id ? `<button class="btn sm" onclick="go('/chat/${o.conversation_id}')">Весь чат</button>` : ""}</div>
 <div class="otl" id="otl">${otTimeline(o, ms)}</div>
 <div id="achip"></div><div class="otin"><button class="ib2" type="button" onclick="pickAtt('chat')" aria-label="Прикрепить скриншот">${svg(P.clip)}</button><input id="otm" placeholder="Написать..." maxlength="2000" onkeydown="if(event.key==='Enter')otSend()"><button class="btn pri" onclick="otSend()" aria-label="Отправить">›</button></div></div></div>`;
