@@ -1,0 +1,5 @@
+create table if not exists duel_rating(user_id uuid primary key references users on delete cascade,rating int not null default 1000,wins int not null default 0,losses int not null default 0,streak int not null default 0);
+create table if not exists duel_queue(user_id uuid primary key references users on delete cascade,category_id uuid not null references categories on delete cascade,joined_at timestamptz not null default now());
+create table if not exists duels(id uuid primary key default gen_random_uuid(),category_id uuid not null references categories,seller_a uuid not null references users on delete cascade,seller_b uuid not null references users on delete cascade,starts_at timestamptz not null default now(),ends_at timestamptz not null,status text not null default 'live' check(status in('live','done')),score_a int,score_b int,winner_id uuid references users,bonus_cents int not null default 0,finished_at timestamptz,rating_a int,rating_b int);
+create index if not exists duels_live on duels(status,ends_at);
+create table if not exists duel_boosts(user_id uuid primary key references users on delete cascade,until timestamptz not null);

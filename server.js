@@ -1,6 +1,6 @@
 import express from "express"; import helmet from "helmet"; import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit"; import bcrypt from "bcryptjs"; import jwt from "jsonwebtoken";
-import pg from "pg"; import routes2 from "./routes2.js"; import routes3 from "./routes3.js"; import routes4 from "./routes4.js"; import routes5 from "./routes5.js"; import { makeBadges } from "./badges.js"; import fs from "fs"; import path from "path"; import { fileURLToPath } from "url";
+import pg from "pg"; import routes2 from "./routes2.js"; import routes3 from "./routes3.js"; import routes6 from "./routes6.js"; import routes4 from "./routes4.js"; import routes5 from "./routes5.js"; import { makeBadges } from "./badges.js"; import fs from "fs"; import path from "path"; import { fileURLToPath } from "url";
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const { DATABASE_URL, JWT_SECRET, NODE_ENV } = process.env;
 if (!DATABASE_URL || !JWT_SECRET) { console.error("DATABASE_URL and JWT_SECRET are required"); process.exit(1); }
@@ -20,6 +20,7 @@ await pool.query(fs.readFileSync(path.join(dir, "schema_v7.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v8.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v9.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v10.sql"), "utf8"));
+await pool.query(fs.readFileSync(path.join(dir, "schema_v11.sql"), "utf8"));
 
 const app = express(); app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], fontSrc: ["https://fonts.gstatic.com"], scriptSrc: ["'self'", "'unsafe-inline'"], scriptSrcAttr: ["'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:", "https://*.supabase.co"], connectSrc: ["'self'"] } } }));
@@ -67,6 +68,7 @@ const LCOLS = "l.id,l.status,l.seller_id,l.title,l.summary,l.price_cents,l.curre
 const LFROM = "from listings l join games g on g.id=l.game_id join categories c on c.id=l.category_id join users u on u.id=l.seller_id left join (select seller_id,round(avg(rating),2) avg,count(*) cnt from reviews group by seller_id) r on r.seller_id=l.seller_id left join lateral (select f.percent,f.ends_at,greatest(1,floor(f.base_cents*(100-f.percent)/100.0))::int sale_cents from flash_sales f where f.listing_id=l.id and f.ends_at>now() and f.starts_at<=now() and f.cancelled_at is null and f.base_cents=l.price_cents order by f.ends_at desc limit 1) fs on true";
 const r4 = routes4(app, { q, pool, tx, E, wrap, need, pushUser, hooks, L: { LCOLS, LFROM } });
 routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUser });
+routes6(app, { q, pool, tx, E, wrap, need, hooks, pushUser });
 app.get("/api/listings", wrap(async (req, res) => {
   const { game, category, min, max, q: s, seller, sort, offset } = req.query, w = ["l.status='active'"], p = [];
   const add = (c, v) => { p.push(v); w.push(c.replaceAll("?", "$" + p.length)); };
@@ -75,7 +77,8 @@ app.get("/api/listings", wrap(async (req, res) => {
   if (s) add("(l.title ilike ? or l.summary ilike ?)", "%" + s + "%");
   if (+req.query.rating > 0) add("coalesce(r.avg,0)>=?", +req.query.rating);
   const ord = { cheap: "l.price_cents asc", expensive: "l.price_cents desc", rating: "coalesce(r.avg,0) desc", new: "l.created_at desc" }[sort] || "l.created_at desc";
-  { const rows = await q(`select ${LCOLS} ${LFROM} where ${w.join(" and ")} order by ${ord} limit 50 offset ${Math.max(0, +offset || 0)}`, p); const bm = await B.badgesFor(rows.map(r => r.seller_id)); res.json(rows.map(r => ({ ...r, online: online(r.seller_id), badges: bm[r.seller_id] || [] }))); }
+  const boost = (!sort || sort === "new") ? "exists(select 1 from duel_boosts db where db.user_id=l.seller_id and db.until>now()) desc, " : "";
+  { const rows = await q(`select ${LCOLS} ${LFROM} where ${w.join(" and ")} order by ${boost}${ord} limit 50 offset ${Math.max(0, +offset || 0)}`, p); const bm = await B.badgesFor(rows.map(r => r.seller_id)); res.json(rows.map(r => ({ ...r, online: online(r.seller_id), badges: bm[r.seller_id] || [] }))); }
 }));
 app.get("/api/listings/:id", wrap(async (req, res) => {
   const [l] = await q(`select ${LCOLS},l.details,l.deactivate_on_sale,l.attrs,l.image_media,l.seller_id,l.status,case when l.seller_id=$2 then l.after_msg end after_msg ${LFROM} where l.id=$1 and (l.status='active' or l.seller_id=$2 or exists(select 1 from users x where x.id=$2 and x.role in ('moderator','admin','owner')))`, [req.params.id, req.user?.id || null]);
@@ -122,7 +125,7 @@ app.post("/api/orders", need, wrap(async (req, res) => {
 }));
 app.get("/api/orders", need, wrap(async (req, res) => res.json(await q("select o.*,l.title,case when o.status in ('paid','in_progress','completed') then l.after_msg end after_msg from orders o join listings l on l.id=o.listing_id where $1 in (o.buyer_id,o.seller_id,o.partner_id) order by o.created_at desc", [req.user.id]))));
 app.get("/api/orders/:id", need, wrap(async (req, res) => {
-  const [o] = await q("select o.*,l.title,l.summary,l.details,l.attrs,l.image_media,g.name game_name,g.slug game,c.name category_name,c.slug category,su.username seller_name,su.avatar_media seller_avatar_media,su.avatar_preset seller_avatar_preset,bu.avatar_media buyer_avatar_media,bu.avatar_preset buyer_avatar_preset,(select cv.id from conversations cv where least(cv.buyer_id,cv.seller_id)=least(o.buyer_id,o.seller_id) and greatest(cv.buyer_id,cv.seller_id)=greatest(o.buyer_id,o.seller_id) limit 1) conversation_id,(select username from users where id=o.partner_id) partner_name,(select username from users where id=o.buyer_id) buyer_name,case when o.status in ('paid','in_progress','completed') then l.after_msg end after_msg from orders o join listings l on l.id=o.listing_id join games g on g.id=l.game_id join categories c on c.id=l.category_id join users su on su.id=o.seller_id join users bu on bu.id=o.buyer_id where o.id=$1 and $2 in (o.buyer_id,o.seller_id,o.partner_id)", [req.params.id, req.user.id]);
+  const [o] = await q("select o.*,l.title,l.summary,l.details,l.attrs,l.image_media,g.name game_name,g.slug game,c.name category_name,c.slug category,su.username seller_name,su.avatar_media seller_avatar_media,su.theme->>'avatar_preset' seller_avatar_preset,bu.avatar_media buyer_avatar_media,bu.theme->>'avatar_preset' buyer_avatar_preset,(select cv.id from conversations cv where least(cv.buyer_id,cv.seller_id)=least(o.buyer_id,o.seller_id) and greatest(cv.buyer_id,cv.seller_id)=greatest(o.buyer_id,o.seller_id) limit 1) conversation_id,(select username from users where id=o.partner_id) partner_name,(select username from users where id=o.buyer_id) buyer_name,case when o.status in ('paid','in_progress','completed') then l.after_msg end after_msg from orders o join listings l on l.id=o.listing_id join games g on g.id=l.game_id join categories c on c.id=l.category_id join users su on su.id=o.seller_id join users bu on bu.id=o.buyer_id where o.id=$1 and $2 in (o.buyer_id,o.seller_id,o.partner_id)", [req.params.id, req.user.id]);
   if (!o) throw E(404, "not found"); o.seller_online = online(o.seller_id); o.buyer_online = online(o.buyer_id); o.events = await q("select status,created_at from order_events where order_id=$1 order by id", [o.id]); res.json(o);
 }));
 const T = { cancelled: ["pending_payment", o => [o.buyer_id, o.seller_id]], in_progress: ["paid", o => [o.seller_id]], completed: ["in_progress", o => [o.buyer_id]] };

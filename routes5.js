@@ -12,6 +12,7 @@ export default function routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUs
     try { await c.query("update wallets set balance=balance+$2 where user_id=$1", [uid, amount]); } catch (e) { if (e.code === "23514" || /check constraint/.test(e.message)) throw E(409, "not enough funds"); throw e; }
     return true;
   };
+  hooks.move = move;
   hooks.settleOrder = async (c, o, to) => { // выплата продавцу или возврат покупателю, один раз на заказ
     if (!o || o.payment_status !== "confirmed") return false;
     const amt = o.total_cents / 100, key = "settle:" + o.id;
