@@ -299,15 +299,15 @@ function posReset() { if (typeof PV !== "undefined") { PV.pos = {}; pvr() } }
     const kb = !!vv && innerHeight - vv.height > 120, inchat = !!document.querySelector(".mm.ch");
     document.body.classList.toggle("inchat", inchat); document.body.classList.toggle("kb", kb);
     const hd = document.querySelector("header"), bn = document.querySelector(".bn");
-    root.style.setProperty("--vvh", (vv ? vv.height : innerHeight) + "px");
+    root.style.setProperty("--vvh", (vv ? vv.height : innerHeight) + "px"); root.style.setProperty("--vvt", (vv ? vv.offsetTop : 0) + "px");
     root.style.setProperty("--hhh", (hd ? hd.offsetHeight : 0) + "px");
     root.style.setProperty("--bnh", (bn && getComputedStyle(bn).display !== "none" ? bn.offsetHeight : 0) + "px");
     if (inchat) { window.scrollTo(0, 0); const m = document.querySelector("#chm"); if (m && kb) m.scrollTop = 1e9 }
   }
-  if (vv) { vv.addEventListener("resize", set); vv.addEventListener("scroll", () => { if (document.body.classList.contains("inchat")) window.scrollTo(0, 0) }) }
+  if (vv) { vv.addEventListener("resize", set); vv.addEventListener("scroll", () => { if (document.body.classList.contains("inchat")) { window.scrollTo(0, 0); set() } }) }
   addEventListener("resize", set); addEventListener("hashchange", () => setTimeout(set, 60));
   const ar = window.afterRoute; window.afterRoute = function () { const r = ar && ar.apply(this, arguments); setTimeout(set, 0); return r };
-  document.addEventListener("focusin", e => { if (e.target && e.target.id === "lt") setTimeout(set, 300) });
+  document.addEventListener("focusin", e => { if (e.target && e.target.id === "lt") [60, 250, 500, 900].forEach(d => setTimeout(set, d)) }); document.addEventListener("focusout", e => { if (e.target && e.target.id === "lt") [60, 300, 700].forEach(d => setTimeout(set, d)) });
   set();
 })();
 
