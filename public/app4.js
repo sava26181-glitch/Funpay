@@ -44,7 +44,7 @@ function flashBlock(fl) {
 }
 function newsList(ns) {
   if (!ns.length) return empty("Новостей пока нет.");
-  return ns.map(n => `<article class="news"><div class="row bet"><b class="nt">${esc(n.title)}</b>${isAdm() ? `<button class="btn sm dng" onclick="newsDel('${n.id}')" aria-label="Удалить новость">Удалить</button>` : ""}</div><small class="m">${fmtD(n.created_at)}${n.author ? " · " + esc(n.author) : ""}</small>${(n.media_ids || []).length ? `<div class="nph n${Math.min(n.media_ids.length, 3)}">${n.media_ids.map(id => `<img loading="lazy" src="/api/media/${id}" alt="" onclick="lbx(this.src)">`).join("")}</div>` : ""}${n.body ? `<p class="nb">${esc(n.body)}</p>` : ""}<a class="lk ncb" id="ncb-${n.id}" onclick="ncToggle('${n.id}')">Комментарии (${n.comments || 0})</a><div class="ncs" id="nc-${n.id}" hidden></div></article>`).join("");
+  return ns.map(n => `<article class="news"><div class="row bet"><b class="nt">${esc(n.title)}</b>${isAdm() ? `<span class="row" style="gap:6px"><button class="btn sm" onclick="newsEdit('${n.id}')">Изменить</button><button class="btn sm dng" onclick="newsDel('${n.id}')" aria-label="Удалить новость">Удалить</button></span>` : ""}</div><small class="m">${fmtD(n.created_at)}${n.author ? " · " + esc(n.author) : ""}</small>${(n.media_ids || []).length ? `<div class="nph n${Math.min(n.media_ids.length, 3)}">${n.media_ids.map(id => `<img loading="lazy" src="/api/media/${id}" alt="" onclick="lbx(this.src)">`).join("")}</div>` : ""}${n.body ? `<p class="nb">${esc(n.body)}</p>` : ""}<a class="lk ncb" id="ncb-${n.id}" onclick="ncToggle('${n.id}')">Комментарии (${n.comments || 0})</a><div class="ncs" id="nc-${n.id}" hidden></div></article>`).join("");
 }
 const NCN = {};
 async function ncToggle(id) {
@@ -63,13 +63,11 @@ const ic4n = () => `<svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></
 const ncSend = act(async id => { if (window._ncs) return; const el = $("#ni-" + id), v = el.value.trim(); if (!v) return; window._ncs = 1; el.value = ""; try { await api(`/news/${id}/comments`, { method: "POST", body: { body: v } }); await ncLoad(id); $("#ni-" + id)?.focus() } catch (e) { el.value = v; throw e } finally { window._ncs = 0 } });
 const ncDel = act(async (cid, id) => { await api("/news/comments/" + cid, { method: "DELETE" }); await ncLoad(id) });
 async function home() {
-  const [ls, news, fl] = await Promise.all([api("/listings?sort=new"), api("/news?limit=10").catch(() => []), api("/flash").catch(() => [])]);
+  const news = await api("/news?limit=10").catch(() => []);
   setTimeout(tick, 0);
   return `<section class="promo"><div class="pl">${logo(76)}<h1>Всё для твоих любимых игр</h1></div><p>Находи игровые товары и услуги в одном месте.</p><button class="btn pri big" onclick="go('/games')">Перейти к покупкам</button></section>
-<div class="qk"><a onclick="go('/battles')">${ic4("swords", 20)}<b>Битвы магазинов</b><small>Каждую неделю</small></a><a onclick="go('/code')">${ic4("shield", 20)}<b>Кодекс продавца</b><small>Честные правила</small></a></div>
-${flashBlock(fl)}
-<div class="row bet" style="margin-top:var(--gap)"><h2 class="h2i">${ic4("news", 20)}Новости</h2>${isAdm() ? '<button class="btn sm pri" onclick="newsForm()">Добавить новость</button>' : ""}</div><div class="nws">${newsList(news)}</div>
-<h2>Новые предложения</h2>${rows(ls.slice(0, 5), "Пока нет опубликованных предложений.")}`;
+<div class="qk"><a onclick="go('/battles')">${ic4("swords", 20)}<b>Дуэли магазинов</b><small>24 часа, призы</small></a><a onclick="go('/code')">${ic4("shield", 20)}<b>Кодекс продавца</b><small>Честные правила</small></a></div>
+<div class="row bet" style="margin-top:var(--gap)"><h2 class="h2i">${ic4("news", 20)}Новости</h2>${isAdm() ? '<button class="btn sm pri" onclick="newsForm()">Добавить новость</button>' : ""}</div><div class="nws">${newsList(news)}</div>`;
 }
 function newsForm() {
   mdl(`<h3 style="margin-top:0">Новая новость</h3><label>Заголовок</label><input id="nt" maxlength="120"><label>Текст</label><textarea id="nb" rows="5" maxlength="4000"></textarea><label>Фото (до 6)</label><input id="nf" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif"><div class="hint">png, jpeg, webp или gif до 2 МБ каждое</div><button class="btn pri" style="margin-top:10px;width:100%" onclick="newsSave(this)">Опубликовать</button>`);
@@ -86,7 +84,7 @@ const newsDel = id => ask("Удалить эту новость? Действи�
 // ---- час распродажи (продавец)
 let MYFL = [];
 const myFl = id => { const f = MYFL.find(x => x.listing_id === id); return f ? ` · <span class="fsl">${ic4("bolt", 12)}−${f.percent}% · <i data-end="${f.ends_at}">--:--</i></span>` : "" };
-const flBtn = l => { const cb = `<button class="btn sm" onclick="cardForm('${l.id}')">Оформление карточки</button>`; if (l.status !== "active") return cb; const on = MYFL.some(x => x.listing_id === l.id); return cb + (on ? `<button class="btn sm" onclick="flStop('${l.id}')">Остановить распродажу</button>` : `<button class="btn sm" onclick="flashForm('${l.id}')">Час распродажи</button>`) };
+const flBtn = l => `<button class="btn sm" onclick="cardForm('${l.id}')">Оформление карточки</button>`;
 function flashForm(id) {
   mdl(`<h3 style="margin-top:0">Час распродажи</h3><p class="m" style="margin-top:0">Цена лота временно снизится, а лот появится на главной с таймером. Покупатели, у которых лот в избранном, получат уведомление.</p><label>Длительность</label><select id="fm"><option value="30">30 минут</option><option value="45">45 минут</option><option value="60">60 минут</option></select><label>Скидка</label><select id="fp">${[10, 15, 20, 25, 30, 40, 50].map(p => `<option value="${p}">${p}%</option>`).join("")}</select><p class="m"><small>Если во время распродажи изменить цену лота, скидка закончится. Повторный запуск на тот же лот возможен через 6 часов, одновременно не больше 3 распродаж.</small></p><button class="btn pri" style="width:100%" onclick="flStart('${id}')">Запустить</button>`);
 }
@@ -167,10 +165,11 @@ function achOpen() { mdl(`<h3 style="margin-top:0">Ачивки</h3>${achBlock(w
 // ---- чат: лента сообщений в стиле маркетплейса
 window.CHO = "";
 function bubx(m) {
-  const mine = m.sender_id === ME.id, c = window.CHA || {}, name = mine ? ME.username : (c.n || window.CHO || "Собеседник"), txt = m.body === "[вложение]" ? "" : esc(m.body), need = !mine && window.TR && TR.lang() && txt;
+  if (m.kind === "system") return `<div class="fsys" id="m${m.id}"><div class="otn"><b>Система</b><span class="tag">оповещение</span><time>${new Date(m.created_at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</time></div><div class="otb"><i>i</i><p>${esc(m.body)}${m.order_id ? ` <a class="lk" onclick="go('/order/${m.order_id}')">Открыть заказ</a>` : ""}</p></div></div>`;
+  const mine = m.sender_id === ME.id, c = window.CHA || {}, name = mine ? ME.username : (m.sender_name || c.n || window.CHO || "Собеседник"), stf = m.kind === "staff" ? `<span class="tag">модератор</span>` : "", txt = m.body === "[вложение]" ? "" : esc(m.body), need = !mine && window.TR && TR.lang() && txt;
   const av = mine ? avs(ME.username, ME.avatar_media, false, ME.theme && ME.theme.avatar_preset) : avs(name, c.m, c.on, c.p);
   const lot = m.lot_title && m.listing_id ? `<a class="lotc" onclick="go('/l/${m.listing_id}')">По лоту: ${esc(m.lot_title)}</a>` : "";
-  return `<div class="fm ${mine ? "me" : ""}" id="m${m.id}" ${need ? `data-tr="${m.id}"` : ""}>${av}<div class="fb"><div class="mh"><b>${esc(name)}</b><time>${new Date(m.created_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</time></div>${lot}<div class="bt">${txt}</div>${m.atts && m.atts.length ? `<div class="mat">${atts(m.atts)}</div>` : ""}</div></div>`;
+  return `<div class="fm ${mine ? "me" : ""}" id="m${m.id}" ${need ? `data-tr="${m.id}"` : ""}>${av}<div class="fb"><div class="mh"><b>${esc(name)}</b>${stf}<time>${new Date(m.created_at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}</time></div>${lot}<div class="bt">${txt}</div>${m.atts && m.atts.length ? `<div class="mat">${atts(m.atts)}</div>` : ""}</div></div>`;
 }
 async function msgs(cid) {
   need(); const cs = await api("/conversations"); let ms = [], cur = null, on = null; CC = cid || null;
@@ -264,7 +263,7 @@ const topupDo = act(async () => { await api("/finance/topup", { method: "POST", 
 function withdrawForm(bal) {
   mdl(`<h3 style="margin:0 0 8px">Вывести деньги</h3><p class="m" style="margin:0 0 10px">Доступно: ${fm(bal)}. Заявки обрабатывает администратор вручную. Пока баланс тестовый, реальные деньги не переводятся.</p><label>Сумма, ₽</label><input id="wda" type="number" inputmode="numeric" min="10" value="${Math.floor(bal) >= 10 ? Math.floor(bal) : 10}"><label>Способ</label><select id="wdm"><option value="card">Банковская карта</option><option value="sbp">СБП</option><option value="crypto">Криптовалюта</option><option value="other">Другое</option></select><label>Реквизиты</label><input id="wdd" maxlength="200" placeholder="Номер карты, телефон или адрес кошелька"><button class="btn pri" style="width:100%;margin-top:12px" onclick="withdrawDo()">Отправить заявку</button>`);
 }
-const withdrawDo = act(async () => { await api("/finance/withdraw", { method: "POST", body: { amount: +$("#wda").value, method: $("#wdm").value, details: $("#wdd").value } }); $("#md")?.remove(); toast("Заявка отправлена"); route() });
+const withdrawDo = act(async () => { await api("/finance/withdraw", { method: "POST", body: { amount: +$("#wda").value, method: window._wdm || ($("#wdm") && $("#wdm").value) || "card", details: $("#wdd").value } }); $("#md")?.remove(); toast("Заявка отправлена"); route() });
 const payBal = id => payConfirm(id);
 async function wdAdmin() {
   const ws = await api("/admin/withdrawals");
@@ -318,7 +317,7 @@ const payConfirm = act(async id => {
   if (o.status !== "pending_payment") throw new Error("Заказ уже не ждёт оплаты");
   window._pay = { id, need: Math.ceil(-left), test: f.test_mode };
   const unit = o.unit_price_cents / 100;
-  mdl(`<h3 style="margin:0 0 2px">Оформление заказа</h3><p class="m" style="margin:0 0 10px">Заказ #${esc(o.number || "")}</p>${ckSteps(0)}<div class="pcf"><div><span>Товар</span><b style="text-align:right">${esc(o.title)}</b></div><div><span>Цена × количество</span><b>${fm(unit)} × ${o.quantity}</b></div><div><span>Способ оплаты</span><b>Баланс DonutPay</b></div><div><span>Ваш баланс</span><b>${fm(f.balance)}</b></div><div><span>К оплате</span><b style="font-size:17px">${fm(sum)}</b></div></div><p class="m" style="margin:10px 0 4px">Деньги резервируются на сайте и переходят продавцу только после того, как вы подтвердите получение товара. При споре их вернёт модератор.</p>${f.test_mode ? `<p class="m" style="margin:0 0 10px"><small>Баланс тестовый: реальные деньги не списываются. Оплата картой и СБП появится позже.</small></p>` : ""}${enough ? `<button class="btn pri" style="width:100%" onclick="payDo()">Оплатить ${fm(sum)}</button>` : f.test_mode ? `<p class="neg2" style="margin:0 0 8px">Не хватает ${fm(-left)}</p><button class="btn pri" style="width:100%" onclick="payTop()">Пополнить на ${fm(Math.max(10, window._pay.need))} и оплатить</button>` : `<button class="btn" style="width:100%" onclick="$('#md').remove();go('/finance')">Перейти в финансы</button>`}<button class="btn" style="width:100%;margin-top:8px" onclick="$('#md').remove()">Оплатить позже</button>`);
+  mdl(`<h3 style="margin:0 0 2px">Оформление заказа</h3><p class="m" style="margin:0 0 10px">Заказ #${esc(o.number || "")}</p>${ckSteps(0)}<div class="pcf"><div><span>Товар</span><b style="text-align:right">${esc(o.title)}</b></div><div><span>Цена × количество</span><b>${fm(unit)} × ${o.quantity}</b></div><div><span>Способ оплаты</span><b>Баланс DonutPay</b></div><div><span>Ваш баланс</span><b>${fm(f.balance)}</b></div>${o.discount_cents > 0 ? `<div><span>Скидка по промокоду</span><b class="okt">−${fm(o.discount_cents / 100)}</b></div>` : ""}<div><span>К оплате</span><b style="font-size:17px">${fm(sum)}</b></div></div><div class="pmr"><input id="pmc" placeholder="Промокод" maxlength="32" autocapitalize="characters" value="" style="text-transform:uppercase"><button class="btn" onclick="promoApply('${id}')">Применить</button>${o.discount_cents > 0 ? `<button class="btn" onclick="promoApply('${id}',true)">Убрать</button>` : ""}</div><p class="m" style="margin:10px 0 4px">Деньги резервируются на сайте и переходят продавцу только после того, как вы подтвердите получение товара. При споре их вернёт модератор.</p>${f.test_mode ? `<p class="m" style="margin:0 0 10px"><small>Баланс тестовый: реальные деньги не списываются. Оплата картой и СБП появится позже.</small></p>` : ""}${enough ? `<button class="btn pri" style="width:100%" onclick="payDo()">Оплатить ${fm(sum)}</button>` : f.test_mode ? `<p class="neg2" style="margin:0 0 8px">Не хватает ${fm(-left)}</p><button class="btn pri" style="width:100%" onclick="payTop()">Пополнить на ${fm(Math.max(10, window._pay.need))} и оплатить</button>` : `<button class="btn" style="width:100%" onclick="$('#md').remove();go('/finance')">Перейти в финансы</button>`}<button class="btn" style="width:100%;margin-top:8px" onclick="$('#md').remove()">Оплатить позже</button>`);
 });
 const payDo = act(async () => {
   if (window._paying) return; window._paying = 1; const id = window._pay.id;
@@ -338,3 +337,18 @@ function azSpy() {
 }
 addEventListener("scroll", azSpy, { passive: true });
 (function () { const hd = document.querySelector("header"); if (hd && window.ResizeObserver) new ResizeObserver(() => { document.documentElement.style.setProperty("--hhh", hd.offsetHeight + "px") }).observe(hd) })();
+
+// ---- редактирование новости
+const newsEdit = act(async id => {
+  const n = (await api("/news?limit=30")).find(x => x.id === id); if (!n) throw new Error("Новость не найдена");
+  window._ne = id;
+  mdl(`<h3 style="margin-top:0">Изменить новость</h3><label>Заголовок</label><input id="nt" maxlength="120" value="${esc(n.title)}"><label>Текст</label><textarea id="nb" rows="6" maxlength="4000">${esc(n.body || "")}</textarea>${(n.media_ids || []).length ? `<label>Фото (снимите галочку, чтобы удалить)</label><div class="nek">${n.media_ids.map(m => `<label class="nei"><input type="checkbox" class="nkp" value="${m}" checked><img src="/api/media/${m}" alt=""></label>`).join("")}</div>` : ""}<label>Добавить фото</label><input id="nf" type="file" multiple accept="image/png,image/jpeg,image/webp,image/gif"><button class="btn pri" style="margin-top:10px;width:100%" onclick="newsEditSave(this)">Сохранить</button>`);
+});
+const newsEditSave = act(async btn => {
+  const t = $("#nt").value.trim(); if (t.length < 3) throw new Error("Заголовок: минимум 3 символа");
+  btn.disabled = true; btn.textContent = "Сохраняю…";
+  try { const ids = []; for (const f of [...$("#nf").files].slice(0, 6)) ids.push(await upload(f, "news")); await api("/admin/news/" + window._ne, { method: "PATCH", body: { title: t, body: $("#nb").value, keep: [...document.querySelectorAll(".nkp:checked")].map(x => x.value), media: ids } }); $("#md")?.remove(); toast("Новость обновлена"); route() }
+  catch (e) { btn.disabled = false; btn.textContent = "Сохранить"; throw e }
+});
+
+const promoApply = act(async (id, clear) => { const code = clear ? "" : $("#pmc").value.trim(); if (!clear && !code) return; await api(`/orders/${id}/promo`, { method: "POST", body: { code } }); $("#md")?.remove(); await payConfirm(id); toast(clear ? "Промокод убран" : "Промокод применён") });
