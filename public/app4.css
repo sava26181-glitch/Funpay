@@ -259,3 +259,17 @@ body{padding-top:var(--hhh,150px)}
 .bb.th .bbi{border-radius:20px 20px 20px 6px}.bb.me .bbi{border-radius:20px 20px 6px 20px}
 @media(max-width:780px){.bb{padding:2px 12px}.bb .bbi{max-width:84%}}
 .bb .lotc{padding:0!important;background:none!important;border:0!important;text-align:left}
+/* v16.5 контраст на любых акцентах */
+.bb .lotc{display:inline-flex!important;align-items:center;gap:6px;max-width:100%;padding:4px 10px!important;border-radius:10px!important;font-size:13px!important;font-weight:700!important;text-decoration:none!important;opacity:1!important;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:0!important;flex:0 0 auto!important;margin-bottom:4px!important}
+.bb.me .lotc{background:color-mix(in srgb,var(--pon,#fff) 20%,transparent)!important;color:var(--pon,#fff)!important}
+.bb.th .lotc{background:color-mix(in srgb,var(--p) 22%,transparent)!important;color:var(--t)!important}
+.bb .lotc::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.bb.me .bm{opacity:.8;color:var(--pon,#fff)}.bb.th .bm{opacity:.7}
+.bb.me .bm .ck{opacity:.8}.bb.me .bm .ck.rd{opacity:1}
+.bb .bsf{color:var(--t)!important;background:color-mix(in srgb,var(--p) 25%,transparent);padding:2px 8px;border-radius:7px;margin-bottom:3px}
+.bb.me .bsf{color:var(--pon,#fff)!important;background:color-mix(in srgb,var(--pon,#fff) 20%,transparent)}
+.bb .trl a{color:inherit}
+.otb i,.fsys .otb i{color:var(--pon,#fff)!important}
+.btn.pri,.ib2.pri{color:var(--pon,#fff)!important}.ib2.pri svg{stroke:currentColor}
+.bb .bt a{color:inherit;text-decoration:underline}
+.bb .lotc{margin-right:100%!important}
