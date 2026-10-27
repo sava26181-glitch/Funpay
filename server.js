@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
 import express from "express"; import helmet from "helmet"; import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit"; import bcrypt from "bcryptjs"; import jwt from "jsonwebtoken";
-import pg from "pg"; import routes2 from "./routes2.js"; import routes3 from "./routes3.js"; import routes6 from "./routes6.js"; import sysmsg from "./sysmsg.js"; import routes4 from "./routes4.js"; import routes5 from "./routes5.js"; import { makeBadges } from "./badges.js"; import fs from "fs"; import path from "path"; import { fileURLToPath } from "url";
+import pg from "pg"; import routes2 from "./routes2.js"; import routes3 from "./routes3.js"; import routes7 from "./routes7.js";
+import routes6 from "./routes6.js"; import sysmsg from "./sysmsg.js"; import routes4 from "./routes4.js"; import routes5 from "./routes5.js"; import { makeBadges } from "./badges.js"; import fs from "fs"; import path from "path"; import { fileURLToPath } from "url";
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const { DATABASE_URL, JWT_SECRET, NODE_ENV } = process.env;
 if (!DATABASE_URL || !JWT_SECRET) { console.error("DATABASE_URL and JWT_SECRET are required"); process.exit(1); }
@@ -25,6 +26,7 @@ await pool.query(fs.readFileSync(path.join(dir, "schema_v11.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v12.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v13.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v14.sql"), "utf8"));
+await pool.query(fs.readFileSync(path.join(dir, "schema_v15.sql"), "utf8"));
 
 const app = express(); app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], fontSrc: ["https://fonts.gstatic.com"], scriptSrc: ["'self'", "'unsafe-inline'"], scriptSrcAttr: ["'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:", "https://*.supabase.co"], connectSrc: ["'self'"] } } }));
@@ -82,6 +84,7 @@ const LFROM = "from listings l join games g on g.id=l.game_id join categories c 
 const r4 = routes4(app, { q, pool, tx, E, wrap, need, pushUser, hooks, L: { LCOLS, LFROM } });
 routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUser });
 routes6(app, { q, pool, tx, E, wrap, need, hooks, pushUser });
+routes7(app, { q, pool, tx, E, wrap, need, hooks, pushUser });
 app.get("/api/listings", wrap(async (req, res) => {
   const { game, category, min, max, q: s, seller, sort, offset } = req.query, w = ["l.status='active'"], p = [];
   const add = (c, v) => { p.push(v); w.push(c.replaceAll("?", "$" + p.length)); };
@@ -139,7 +142,7 @@ app.post("/api/orders", need, wrap(async (req, res) => {
 }));
 app.get("/api/orders", need, wrap(async (req, res) => res.json(await q("select o.*,l.title,case when o.status in ('paid','in_progress','completed') then l.after_msg end after_msg from orders o join listings l on l.id=o.listing_id where $1 in (o.buyer_id,o.seller_id,o.partner_id) order by o.created_at desc", [req.user.id]))));
 app.get("/api/orders/:id", need, wrap(async (req, res) => {
-  const [o] = await q("select o.*,l.title,l.auto_delivery,l.summary,l.details,l.attrs,l.image_media,g.name game_name,g.slug game,c.name category_name,c.slug category,su.username seller_name,su.avatar_media seller_avatar_media,su.theme->>'avatar_preset' seller_avatar_preset,bu.avatar_media buyer_avatar_media,bu.theme->>'avatar_preset' buyer_avatar_preset,(select cv.id from conversations cv where least(cv.buyer_id,cv.seller_id)=least(o.buyer_id,o.seller_id) and greatest(cv.buyer_id,cv.seller_id)=greatest(o.buyer_id,o.seller_id) limit 1) conversation_id,(select username from users where id=o.partner_id) partner_name,(select username from users where id=o.buyer_id) buyer_name,(select json_build_object('code',pc.code,'kind',pc.kind,'value',pc.value) from promo_codes pc where pc.id=o.promo_id) promo,case when o.status in ('paid','in_progress','completed') then l.after_msg end after_msg from orders o join listings l on l.id=o.listing_id join games g on g.id=l.game_id join categories c on c.id=l.category_id join users su on su.id=o.seller_id join users bu on bu.id=o.buyer_id where o.id=$1 and $2 in (o.buyer_id,o.seller_id,o.partner_id)", [req.params.id, req.user.id]);
+  const [o] = await q("select o.*,l.title,l.auto_delivery,l.summary,l.details,l.attrs,l.image_media,g.name game_name,g.slug game,c.name category_name,c.slug category,su.username seller_name,su.avatar_media seller_avatar_media,su.theme->>'avatar_preset' seller_avatar_preset,bu.avatar_media buyer_avatar_media,bu.theme->>'avatar_preset' buyer_avatar_preset,(select cv.id from conversations cv where least(cv.buyer_id,cv.seller_id)=least(o.buyer_id,o.seller_id) and greatest(cv.buyer_id,cv.seller_id)=greatest(o.buyer_id,o.seller_id) limit 1) conversation_id,(select username from users where id=o.partner_id) partner_name,(select username from users where id=o.buyer_id) buyer_name,(select json_build_object('rating',rv.rating,'body',rv.body,'created_at',rv.created_at,'edited_at',rv.edited_at,'reply',rv.reply,'reply_at',rv.reply_at) from reviews rv where rv.order_id=o.id) review,(select json_build_object('code',pc.code,'kind',pc.kind,'value',pc.value) from promo_codes pc where pc.id=o.promo_id) promo,case when o.status in ('paid','in_progress','completed') then l.after_msg end after_msg from orders o join listings l on l.id=o.listing_id join games g on g.id=l.game_id join categories c on c.id=l.category_id join users su on su.id=o.seller_id join users bu on bu.id=o.buyer_id where o.id=$1 and $2 in (o.buyer_id,o.seller_id,o.partner_id)", [req.params.id, req.user.id]);
   if (!o) throw E(404, "not found"); o.seller_online = online(o.seller_id); o.buyer_online = online(o.buyer_id); o.events = await q("select status,created_at from order_events where order_id=$1 order by id", [o.id]); res.json(o);
 }));
 const T = { cancelled: ["pending_payment", o => [o.buyer_id, o.seller_id]], in_progress: ["paid", o => [o.seller_id]], completed: ["in_progress", o => [o.buyer_id]] };
@@ -160,13 +163,7 @@ app.post("/api/orders/:id/dispute", need, wrap(async (req, res) => {
     await c.query("update orders set status='dispute',updated_at=now() where id=$1", [o.id]); await ev(c, o.id, "dispute", req.user.id); r2.notifyStaff("Новый спор по заказу " + o.id.slice(0, 8) + ". Откройте админ-панель сайта."); hooks.pushSys?.(await hooks.sysMsg?.(c, o.id, "dispute", req.user.id)); return { ok: true };
   }));
 }));
-app.post("/api/orders/:id/review", need, wrap(async (req, res) => {
-  const r = +req.body?.rating; if (!Number.isInteger(r) || r < 1 || r > 5) throw E(400, "rating 1-5");
-  const [o] = await q("select * from orders where id=$1 and buyer_id=$2 and status='completed'", [req.params.id, req.user.id]); if (!o) throw E(404, "not found");
-  try { await q("insert into reviews(order_id,reviewer_id,seller_id,rating,body) values($1,$2,$3,$4,$5)", [o.id, req.user.id, o.seller_id, r, String(req.body.body || "").slice(0, 1000)]); } catch (e) { if (e.code === "23505") throw E(409, "already reviewed"); throw e; }
-  res.status(201).json({ ok: true });
-}));
-app.get("/api/sellers/:username/reviews", wrap(async (req, res) => res.json(await q("select r.rating,r.body,r.created_at,b.username reviewer from reviews r join users s on s.id=r.seller_id join users b on b.id=r.reviewer_id where s.username=$1 order by r.created_at desc limit 50", [req.params.username]))));
+app.get("/api/sellers/:username/reviews", wrap(async (req, res) => res.json(await q("select r.rating,r.body,r.created_at,r.edited_at,r.reply,r.reply_at,b.username reviewer from reviews r join users s on s.id=r.seller_id join users b on b.id=r.reviewer_id where s.username=$1 order by r.created_at desc limit 50", [req.params.username]))));
 app.post("/api/payments/webhook", (_, res) => res.status(501).json({ error: "payment provider not configured" }));
 
 // ---- chat (+ SSE для обновления без перезагрузки)

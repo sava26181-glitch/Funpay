@@ -10,6 +10,12 @@ hooks.sysMsg = async (c, orderId, evName, actorId) => {
     dispute: `По заказу #${o.number} открыт спор. Модератор подключится и увидит переписку в этом чате.`,
     resolved_buyer: `Спор по заказу #${o.number} решён в пользу покупателя ${o.bn}. Деньги возвращены на его баланс.`,
     resolved_seller: `Спор по заказу #${o.number} решён в пользу продавца ${o.sn}. Деньги переведены продавцу.`,
+    review: `Покупатель ${o.bn} написал отзыв к заказу #${o.number}.`,
+    review_edit: `Покупатель ${o.bn} изменил отзыв к заказу #${o.number}.`,
+    review_delete: `Покупатель ${o.bn} удалил отзыв к заказу #${o.number}.`,
+    review_reply: `Продавец ${o.sn} ответил на отзыв к заказу #${o.number}.`,
+    review_reply_edit: `Продавец ${o.sn} изменил ответ на отзыв к заказу #${o.number}.`,
+    review_reply_delete: `Продавец ${o.sn} удалил ответ на отзыв к заказу #${o.number}.`,
     closed: `Спор по заказу #${o.number} закрыт модератором.`,
   }[evName]; if (!T) return null;
   let { rows: [cv] } = await c.query("select id from conversations where least(buyer_id,seller_id)=least($1::uuid,$2::uuid) and greatest(buyer_id,seller_id)=greatest($1::uuid,$2::uuid) limit 1", [o.buyer_id, o.seller_id]);
