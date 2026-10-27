@@ -13,12 +13,22 @@ export default function routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUs
     return true;
   };
   hooks.move = move;
+  // ТЕСТОВЫЕ комиссии (пока баланс тестовый): с продажи и при выводе. Меняются переменными окружения.
+  const FEE_SALE = () => Math.min(50, Math.max(0, +(process.env.SALE_FEE_PCT ?? 15))), FEE_WD = () => Math.min(50, Math.max(0, +(process.env.WITHDRAW_FEE_PCT ?? 3))), FEE_DISC = 3;
+  const salePct = async (c, uid) => { const { rows: [d] } = await c.query("select fee_until from duel_boosts where user_id=$1 and fee_until>now()", [uid]); return { pct: Math.max(0, FEE_SALE() - (d ? FEE_DISC : 0)), until: d?.fee_until || null } };
+  app.get("/api/fees", wrap(async (req, res) => {
+    const base = FEE_SALE(); let my = base, until = null; if (req.user) { const r = await salePct({ query: pool.query.bind(pool) }, req.user.id); my = r.pct; until = r.until }
+    res.json({ sale_pct: base, my_sale_pct: my, discount_until: until, withdraw_pct: FEE_WD(), test: TEST() });
+  }));
   hooks.settleOrder = async (c, o, to) => { // выплата продавцу или возврат покупателю, один раз на заказ
     if (!o || o.payment_status !== "confirmed") return false;
-    const amt = o.total_cents / 100, key = "settle:" + o.id;
-    const done = to === "buyer" ? await move(c, o.buyer_id, "refund", amt, "order", o.id, key) : await move(c, o.seller_id, "order_payout", amt, "order", o.id, key);
+    const key = "settle:" + o.id; let fee = 0;
+    if (to !== "buyer") { const { pct } = await salePct(c, o.seller_id); fee = Math.round(Number(o.total_cents) * pct / 100) }
+    const amt = (Number(o.total_cents) - fee) / 100, ref = o.total_cents / 100;
+    const done = to === "buyer" ? await move(c, o.buyer_id, "refund", ref, "order", o.id, key) : await move(c, o.seller_id, "order_payout", amt, "order", o.id, key);
     if (done && to === "buyer") await c.query("update orders set payment_status='refunded',updated_at=now() where id=$1", [o.id]);
-    if (done) await c.query("insert into notifications(user_id,type,payload) values($1,$2,$3)", [to === "buyer" ? o.buyer_id : o.seller_id, to === "buyer" ? "order_refund" : "order_payout", { order_id: o.id, number: o.number, amount: amt }]);
+    if (done && to !== "buyer") await c.query("update orders set fee_cents=$2 where id=$1", [o.id, fee]);
+    if (done) await c.query("insert into notifications(user_id,type,payload) values($1,$2,$3)", [to === "buyer" ? o.buyer_id : o.seller_id, to === "buyer" ? "order_refund" : "order_payout", { order_id: o.id, number: o.number, amount: to === "buyer" ? ref : amt, fee: fee / 100 }]);
     return done;
   };
   app.get("/api/finance", need, wrap(async (req, res) => {
@@ -37,7 +47,7 @@ export default function routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUs
     const a = money(req.body?.amount), method = String(req.body?.method || ""), det = String(req.body?.details || "").replace(/[\u0000-\u001f<>]/g, "").trim();
     if (!(a >= 10 && a <= 500000)) throw E(400, "amount 10-500000"); if (!["card", "sbp", "crypto", "other"].includes(method)) throw E(400, "bad method"); if (det.length < 3 || det.length > 200) throw E(400, "details 3-200 chars");
     const r = await tx(async c => {
-      const { rows: [w] } = await c.query("insert into withdrawals(user_id,amount,method,details) values($1,$2,$3,$4) returning id", [req.user.id, a, method, det]);
+      const fee = Math.round(a * FEE_WD()) / 100, { rows: [w] } = await c.query("insert into withdrawals(user_id,amount,method,details,fee) values($1,$2,$3,$4,$5) returning id", [req.user.id, a, method, det, fee]);
       await move(c, req.user.id, "withdraw", -a, "withdrawal", w.id, null); return w;
     });
     res.status(201).json({ id: r.id });
@@ -63,7 +73,7 @@ export default function routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUs
     res.json({ ok: true, number: paid.number, conversation: paid.conv });
   }));
   // выплаты: заявки обрабатывает администратор вручную
-  app.get("/api/admin/withdrawals", need, adm, wrap(async (_req, res) => res.json(await q("select w.id,w.amount,w.method,w.details,w.status,w.note,w.created_at,u.username from withdrawals w join users u on u.id=w.user_id order by (w.status='pending') desc, w.created_at desc limit 100"))));
+  app.get("/api/admin/withdrawals", need, adm, wrap(async (_req, res) => res.json(await q("select w.id,w.amount,w.fee,w.method,w.details,w.status,w.note,w.created_at,u.username from withdrawals w join users u on u.id=w.user_id order by (w.status='pending') desc, w.created_at desc limit 100"))));
   app.post("/api/admin/withdrawals/:id", need, adm, wrap(async (req, res) => {
     if (!uuid(req.params.id)) throw E(404, "not found"); const act = req.body?.action, note = String(req.body?.note || "").slice(0, 300);
     if (!["paid", "reject"].includes(act)) throw E(400, "bad action");

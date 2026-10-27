@@ -8,19 +8,29 @@ export default function routes6(app, { q, pool, tx, E, wrap, need, hooks, pushUs
   // очки продавца за окно [from,to). Возвращает разбивку и события для ленты.
   async function scoreOf(c, seller, cat, opp, from, to) {
     const { rows: os } = await c.query(`select o.id,o.buyer_id,o.total_cents,e.created_at at from order_events e join orders o on o.id=e.order_id join listings l on l.id=o.listing_id join users b on b.id=o.buyer_id
-      where e.status='completed' and o.seller_id=$1 and l.category_id=$2 and e.created_at>=$3 and e.created_at<$4 and o.buyer_id<>$1 and o.buyer_id<>$5 and o.total_cents>=$6 and b.created_at<=e.created_at-($7||' days')::interval order by e.created_at`, [seller, cat, from, to, opp, MIN_ORDER, String(MIN_AGE_D)]);
+      where e.status='completed' and o.seller_id=$1 and l.category_id=$2 and e.created_at>=$3 and e.created_at<$4 and o.buyer_id<>$1 and o.buyer_id<>$5 and o.total_cents>=$6 and b.created_at<=e.created_at-($7||' days')::interval and not exists(select 1 from user_fp fa join user_fp fb on fa.kind=fb.kind and fa.hash=fb.hash where fa.user_id=$1 and fb.user_id=o.buyer_id) order by e.created_at`, [seller, cat, from, to, opp, MIN_ORDER, String(MIN_AGE_D)]);
     const used = new Map(), ev = []; let orders = 0, unique = 0, sum = 0, capped = 0;
     for (const o of os) {
       const first = !used.has(o.buyer_id), raw = 40 + (first ? 30 : 5), room = Math.max(0, BUYER_CAP - (used.get(o.buyer_id) || 0)), pts = Math.min(raw, room);
       used.set(o.buyer_id, (used.get(o.buyer_id) || 0) + pts); orders += Math.min(40, pts); unique += Math.max(0, pts - 40); if (pts < raw) capped++;
       sum += Number(o.total_cents); ev.push({ t: o.at, pts, text: pts ? (first ? "Заказ завершён, новый покупатель" : "Заказ завершён, повторный покупатель") : "Заказ завершён (лимит очков с одного покупателя исчерпан)" });
     }
-    const amount = Math.min(300, Math.floor(sum / 10000)), { rows: rv } = await c.query(`select r.rating,r.created_at from reviews r join orders o on o.id=r.order_id join listings l on l.id=o.listing_id where r.seller_id=$1 and l.category_id=$2 and r.created_at>=$3 and r.created_at<$4 and r.reviewer_id<>$5 and r.rating>=4 order by r.created_at`, [seller, cat, from, to, opp]);
+    const { rows: [fl] } = await c.query(`select count(*)::int n from order_events e join orders o on o.id=e.order_id join listings l on l.id=o.listing_id where e.status='completed' and o.seller_id=$1 and l.category_id=$2 and e.created_at>=$3 and e.created_at<$4 and o.buyer_id<>$1 and exists(select 1 from user_fp fa join user_fp fb on fa.kind=fb.kind and fa.hash=fb.hash where fa.user_id=$1 and fb.user_id=o.buyer_id)`, [seller, cat, from, to]);
+    // скорость ответа: первое сообщение покупателя в новом диалоге по лоту этой категории; ответ до 5 минут +15, позже 60 минут или без ответа −10
+    const { rows: dg } = await c.query(`select distinct on (m.sender_id) m.created_at at, (select min(r.created_at) from messages r where r.conversation_id=m.conversation_id and r.sender_id=$1 and r.created_at>m.created_at) reply
+      from messages m join conversations cv on cv.id=m.conversation_id join listings l on l.id=m.listing_id join users su on su.id=m.sender_id
+      where $1 in(cv.buyer_id,cv.seller_id) and m.sender_id<>$1 and m.sender_id<>$5 and l.seller_id=$1 and l.category_id=$2 and m.created_at>=$3 and m.created_at<$4 and su.created_at<=m.created_at-($6||' days')::interval
+        and not exists(select 1 from messages p where p.conversation_id=m.conversation_id and p.created_at<m.created_at and p.created_at>m.created_at-interval '30 minutes')
+        and not exists(select 1 from user_fp fa join user_fp fb on fa.kind=fb.kind and fa.hash=fb.hash where fa.user_id=$1 and fb.user_id=m.sender_id)
+      order by m.sender_id,m.created_at`, [seller, cat, from, to, opp, String(MIN_AGE_D)]);
+    let speed = 0; for (const x of dg) { const wait = x.reply ? (new Date(x.reply) - new Date(x.at)) / 6e4 : (Math.min(Date.now(), new Date(to)) - new Date(x.at)) / 6e4; let p = 0; if (x.reply && wait <= 5) p = 15; else if (wait > 60) p = -10; if (p) { speed += p; ev.push({ t: x.reply || x.at, pts: p, text: p > 0 ? "Быстрый ответ покупателю (до 5 минут)" : "Покупатель ждал ответа больше часа" }) } }
+    speed = Math.max(-50, Math.min(100, speed));
+    const amount = Math.min(300, Math.floor(sum / 10000)), { rows: rv } = await c.query(`select r.rating,r.created_at from reviews r join orders o on o.id=r.order_id join listings l on l.id=o.listing_id where r.seller_id=$1 and l.category_id=$2 and r.created_at>=$3 and r.created_at<$4 and r.reviewer_id<>$5 and r.rating>=4 and not exists(select 1 from user_fp fa join user_fp fb on fa.kind=fb.kind and fa.hash=fb.hash where fa.user_id=$1 and fb.user_id=r.reviewer_id) order by r.created_at`, [seller, cat, from, to, opp]);
     let reviews = 0; for (const r of rv) { const p = r.rating === 5 ? 50 : 20; reviews += p; ev.push({ t: r.created_at, pts: p, text: `Отзыв ${r.rating}★` }) }
     const { rows: [rf] } = await c.query("select count(*)::int n from orders o join listings l on l.id=o.listing_id where o.seller_id=$1 and l.category_id=$2 and o.payment_status='refunded' and o.updated_at>=$3 and o.updated_at<$4", [seller, cat, from, to]);
     const refunds = -40 * rf.n; if (rf.n) ev.push({ t: to < new Date() ? to : new Date(), pts: refunds, text: `Возвраты покупателям: ${rf.n}` });
-    const total = Math.max(0, orders + unique + amount + reviews + refunds);
-    return { total, orders, unique, amount, reviews, refunds, sum_cents: sum, capped, events: ev };
+    const total = Math.max(0, orders + unique + amount + reviews + refunds + speed);
+    return { total, orders, unique, amount, reviews, refunds, speed, flagged: fl.n, sum_cents: sum, capped, events: ev };
   }
   async function turnover(c, uid) { const { rows: [r] } = await c.query("select coalesce(sum(total_cents),0)::bigint tt from orders where seller_id=$1 and status='completed' and updated_at>now()-interval '30 days'", [uid]); return Number(r.tt) }
   async function finishDuels(c) {
@@ -29,7 +39,7 @@ export default function routes6(app, { q, pool, tx, E, wrap, need, hooks, pushUs
       const A = await scoreOf(c, d.seller_a, d.category_id, d.seller_b, d.starts_at, d.ends_at), B = await scoreOf(c, d.seller_b, d.category_id, d.seller_a, d.starts_at, d.ends_at);
       const win = A.total > B.total ? d.seller_a : B.total > A.total ? d.seller_b : null, ra = d.rating_a ?? 1000, rb = d.rating_b ?? 1000, ea = 1 / (1 + 10 ** ((rb - ra) / 400)), sa = win === d.seller_a ? 1 : win ? 0 : .5;
       const na = Math.round(ra + K * (sa - ea)), nb = Math.round(rb + K * ((1 - sa) - (1 - ea)));
-      let bonus = 0; if (win) { const w = win === d.seller_a ? A : B; bonus = Math.min(BONUS_MAX, Math.floor(w.sum_cents * BONUS_PCT)); if (bonus > 0) await hooks.move?.(c, win, "adjustment", bonus / 100, "duel", d.id, "duel:" + d.id); await c.query("insert into duel_boosts(user_id,until) values($1,now()+($2||' hours')::interval) on conflict(user_id) do update set until=greatest(duel_boosts.until,excluded.until)", [win, String(BOOST_H)]); }
+      let bonus = 0; if (win) { const w = win === d.seller_a ? A : B; bonus = Math.min(BONUS_MAX, Math.floor(w.sum_cents * BONUS_PCT)); if (bonus > 0) await hooks.move?.(c, win, "adjustment", bonus / 100, "duel", d.id, "duel:" + d.id); await c.query("insert into duel_boosts(user_id,until,fee_until) values($1,now()+($2||' hours')::interval,now()+interval '7 days') on conflict(user_id) do update set until=greatest(duel_boosts.until,excluded.until),fee_until=greatest(coalesce(duel_boosts.fee_until,now()),excluded.fee_until)", [win, String(BOOST_H)]); }
       await c.query("update duels set status='done',score_a=$2,score_b=$3,winner_id=$4,bonus_cents=$5,finished_at=now() where id=$1", [d.id, A.total, B.total, win, bonus]);
       for (const [uid, nr, won] of [[d.seller_a, na, win === d.seller_a], [d.seller_b, nb, win === d.seller_b]]) {
         const lost = win && !won;

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import express from "express"; import helmet from "helmet"; import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit"; import bcrypt from "bcryptjs"; import jwt from "jsonwebtoken";
 import pg from "pg"; import routes2 from "./routes2.js"; import routes3 from "./routes3.js"; import routes6 from "./routes6.js"; import routes4 from "./routes4.js"; import routes5 from "./routes5.js"; import { makeBadges } from "./badges.js"; import fs from "fs"; import path from "path"; import { fileURLToPath } from "url";
@@ -21,13 +22,23 @@ await pool.query(fs.readFileSync(path.join(dir, "schema_v8.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v9.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v10.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v11.sql"), "utf8"));
+await pool.query(fs.readFileSync(path.join(dir, "schema_v12.sql"), "utf8"));
 
 const app = express(); app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], fontSrc: ["https://fonts.gstatic.com"], scriptSrc: ["'self'", "'unsafe-inline'"], scriptSrcAttr: ["'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:", "https://*.supabase.co"], connectSrc: ["'self'"] } } }));
 app.use(express.json({ limit: "50kb" })); app.use(cookieParser());
 app.get("/health", (_, r) => r.send("ok"));
 const wrap = f => (req, res, next) => Promise.resolve(f(req, res, next)).catch(next);
-app.use((req, _r, next) => { try { req.user = jwt.verify(req.cookies.t, JWT_SECRET); } catch {} next(); });
+const fpSeen = new Map();
+app.use((req, _r, next) => {
+  try { req.user = jwt.verify(req.cookies.t, JWT_SECRET); } catch {}
+  // отпечатки для защиты дуэлей от накрутки: храним только хэши сети и устройства
+  if (req.user && req.path.startsWith("/api/")) {
+    const ip = String(req.ip || ""), dev = String(req.headers["x-device"] || "").slice(0, 64), h = v => crypto.createHash("sha256").update(JWT_SECRET + "|" + v).digest("hex").slice(0, 32);
+    for (const [k, v] of [["ip", ip], ["dev", dev]]) { if (!v) continue; const key = req.user.id + k + v, t = fpSeen.get(key) || 0; if (Date.now() - t < 6 * 36e5) continue; fpSeen.set(key, Date.now()); if (fpSeen.size > 50000) fpSeen.clear(); pool.query("insert into user_fp(user_id,kind,hash) values($1,$2,$3) on conflict(user_id,kind,hash) do update set last_seen=now()", [req.user.id, k, h(v)]).catch(() => {}); }
+  }
+  next();
+});
 const need = (req, res, next) => req.user ? next() : res.status(401).json({ error: "auth required" });
 const admin = wrap(async (req, res, next) => { const [u] = await q("select role from users where id=$1", [req.user.id]); ["admin", "owner"].includes(u?.role) ? next() : res.status(403).json({ error: "forbidden" }); });
 const setCookie = (res, id) => res.cookie("t", jwt.sign({ id }, JWT_SECRET, { expiresIn: "7d" }), { httpOnly: true, sameSite: "lax", secure: prod, maxAge: 7 * 864e5 });
