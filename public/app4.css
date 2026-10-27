@@ -273,3 +273,4 @@ body{padding-top:var(--hhh,150px)}
 .btn.pri,.ib2.pri{color:var(--pon,#fff)!important}.ib2.pri svg{stroke:currentColor}
 .bb .bt a{color:inherit;text-decoration:underline}
 .bb .lotc{margin-right:100%!important}
+.bb .lotc{padding:2px 7px!important;font-size:11px!important;font-weight:600!important;border-radius:7px!important;gap:4px!important;margin-bottom:2px!important}.bb .lotc::before{width:4px;height:4px}
