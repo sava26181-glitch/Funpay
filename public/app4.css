@@ -235,15 +235,15 @@ body{padding-top:var(--hhh,150px)}
 .chm:has(.bb) .chE{display:none}
 .bb{display:flex;padding:3px 10px;animation:fin .2s both}.bb.me{justify-content:flex-end}.bb.th{justify-content:flex-start}
 .bb .bbi{max-width:84%;min-width:96px;padding:12px 16px 8px;font-size:16px;font-weight:600;line-height:1.36;overflow-wrap:anywhere;position:relative}
-.bb.th .bbi{background:#1b1a24;color:var(--t,#f4f1ff);border-radius:24px 24px 24px 7px;border:1px solid rgba(255,255,255,.05)}
-.bb.me .bbi{background:linear-gradient(135deg,#8b5cf6,#6d28d9);color:#fff;border-radius:24px 24px 7px 24px;box-shadow:0 4px 14px rgba(109,40,217,.28)}
+.bb.th .bbi{background:var(--c3);color:var(--t);border-radius:24px 24px 24px 7px;border:1px solid var(--b)}
+.bb.me .bbi{background:linear-gradient(135deg,var(--p),color-mix(in srgb,var(--p) 62%,#000));color:var(--pon,#fff);border-radius:24px 24px 7px 24px;box-shadow:0 4px 14px color-mix(in srgb,var(--p) 30%,transparent)}
 .bb .bt{white-space:pre-wrap}
 .bb .bm{display:flex;justify-content:flex-end;align-items:center;gap:5px;margin-top:6px;font-size:12px;font-weight:600;opacity:.62;line-height:1}.bb .bm time{font-variant-numeric:tabular-nums}
-.bb.me .bm .ck{opacity:.7}.bb.me .bm .ck.rd{opacity:1;color:#bfdbfe}
-.bb .bsf{display:inline-block;margin-bottom:6px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:#fde047}
+.bb.me .bm .ck{opacity:.65}.bb.me .bm .ck.rd{opacity:1}
+.bb .bsf{display:inline-block;margin-bottom:6px;font-size:11px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--pl)}
 .bb .lotc{display:block;margin-bottom:6px;font-size:13px;font-weight:700;opacity:.85;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
 .bb .mat{margin-top:6px}.bb .mat img{border-radius:14px;max-width:100%}
-.bb .trl{margin-top:6px;padding-top:6px;border-top:1px dashed rgba(255,255,255,.25);font-size:14px;font-weight:500;opacity:.92}.bb .trl a{margin-left:6px;cursor:pointer;text-decoration:underline}
+.bb .trl{margin-top:6px;padding-top:6px;border-top:1px dashed color-mix(in srgb,currentColor 35%,transparent);font-size:14px;font-weight:500;opacity:.92}.bb .trl a{margin-left:6px;cursor:pointer;text-decoration:underline}
 .bb.orig .trl{display:none}
 .mc2 .chm{padding:10px 0 6px}
 @media(max-width:780px){.bb{padding:3px 8px}.bb .bbi{max-width:88%}}

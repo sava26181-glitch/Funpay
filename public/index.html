@@ -4,7 +4,7 @@ const BGS={dark:{n:"Тёмная",bg:"#08080C",c:"#111116",c2:"#19151F",inp:"#0c
 const ACC={dark:"#8B5CF6",white:"#8B5CF6",blue:"#3B82F6",red:"#EF4444",green:"#22C55E",graphite:"#A1A1AA"};for(const k in BGS)BGS[k].acc=ACC[k];
 function hueOf(x){const m=/^#?([0-9a-f]{6})$/i.exec(x||"");if(!m)return 262;const n=parseInt(m[1],16),r=(n>>16&255)/255,g=(n>>8&255)/255,b=(n&255)/255,mx=Math.max(r,g,b),d=mx-Math.min(r,g,b);if(!d)return 262;let H=mx===r?((g-b)/d)%6:mx===g?(b-r)/d+2:(r-g)/d+4;return Math.round((H*60+360)%360)}
 function siteCfg(){try{return JSON.parse(localStorage.dp_site||"{}")}catch{return{}}}
-function applySite(c){c=c||siteCfg();const t=BGS[c.bg]||BGS.dark,r=document.documentElement.style;for(const k of ["bg","c","c2","inp","c3","b","line","t","m"])r.setProperty("--"+k,t[k]);r.setProperty("--p",c.accent||"#8B5CF6");r.setProperty("--hue",(hueOf(c.accent||"#8B5CF6")-262)+"deg");r.colorScheme=c.bg==="white"?"light":"dark"}
+function applySite(c){c=c||siteCfg();const t=BGS[c.bg]||BGS.dark,r=document.documentElement.style;for(const k of ["bg","c","c2","inp","c3","b","line","t","m"])r.setProperty("--"+k,t[k]);r.setProperty("--p",c.accent||"#8B5CF6");{const m=/^#?([0-9a-f]{6})$/i.exec(c.accent||"#8B5CF6"),n=m?parseInt(m[1],16):0x8B5CF6,L=(.299*(n>>16&255)+.587*(n>>8&255)+.114*(n&255))/255;r.setProperty("--pon",L>.62?"#14101f":"#ffffff")}r.setProperty("--hue",(hueOf(c.accent||"#8B5CF6")-262)+"deg");r.colorScheme=c.bg==="white"?"light":"dark"}
 applySite();
 </script>
 <style>
@@ -211,4 +211,4 @@ nav(path);$("#app").innerHTML=SK;
 try{const f={"":home,games,catalog,l:listing,shop,fav,orders,m:msgs,me,admin,login:()=>auth("login"),register:()=>auth("register"),support:text.support}[a]||home;$("#app").innerHTML=await f(b);const c=$("#chm");if(c)c.scrollTop=1e9;if(!/^\/(catalog|games)/.test(path)||true)window.scrollTo(0,0)}
 catch(e){$("#app").innerHTML=`<div class="card" style="margin-top:20px"><b>${esc(e.message)}</b><div class="row" style="margin-top:10px">${e.auth?'<button class="btn pri" onclick="go(\'/login\')">Войти</button>':'<button class="btn" onclick="route()">Повторить</button>'}</div></div>`}}
 if(window.visualViewport){const sv=()=>document.documentElement.style.setProperty("--vh",visualViewport.height+"px");visualViewport.addEventListener("resize",sv);sv()}
-</script><script src="/app2.js?v=18"></script><link rel="stylesheet" href="/app4.css?v=18"><script src="/app3.js?v=18"></script><script src="/app4.js?v=18"></script><script src="/app5.js?v=18"></script><script src="/app6.js?v=18"></script><script src="/rules.js?v=18"></script></body></html>
+</script><script src="/app2.js?v=19"></script><link rel="stylesheet" href="/app4.css?v=19"><script src="/app3.js?v=19"></script><script src="/app4.js?v=19"></script><script src="/app5.js?v=19"></script><script src="/app6.js?v=19"></script><script src="/rules.js?v=19"></script></body></html>
