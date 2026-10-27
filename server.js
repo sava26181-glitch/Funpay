@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import express from "express"; import helmet from "helmet"; import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit"; import bcrypt from "bcryptjs"; import jwt from "jsonwebtoken";
-import pg from "pg"; import routes2 from "./routes2.js"; import routes3 from "./routes3.js"; import routes6 from "./routes6.js"; import routes4 from "./routes4.js"; import routes5 from "./routes5.js"; import { makeBadges } from "./badges.js"; import fs from "fs"; import path from "path"; import { fileURLToPath } from "url";
+import pg from "pg"; import routes2 from "./routes2.js"; import routes3 from "./routes3.js"; import routes6 from "./routes6.js"; import sysmsg from "./sysmsg.js"; import routes4 from "./routes4.js"; import routes5 from "./routes5.js"; import { makeBadges } from "./badges.js"; import fs from "fs"; import path from "path"; import { fileURLToPath } from "url";
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const { DATABASE_URL, JWT_SECRET, NODE_ENV } = process.env;
 if (!DATABASE_URL || !JWT_SECRET) { console.error("DATABASE_URL and JWT_SECRET are required"); process.exit(1); }
@@ -23,6 +23,7 @@ await pool.query(fs.readFileSync(path.join(dir, "schema_v9.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v10.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v11.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v12.sql"), "utf8"));
+await pool.query(fs.readFileSync(path.join(dir, "schema_v13.sql"), "utf8"));
 
 const app = express(); app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], fontSrc: ["https://fonts.gstatic.com"], scriptSrc: ["'self'", "'unsafe-inline'"], scriptSrcAttr: ["'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:", "https://*.supabase.co"], connectSrc: ["'self'"] } } }));
@@ -129,7 +130,7 @@ app.post("/api/orders", need, wrap(async (req, res) => {
   res.status(201).json(await tx(async c => {
     const { rows: [l] } = await c.query("select * from listings where id=$1 and status='active' for update", [req.body?.listingId]);
     if (!l) throw E(404, "listing unavailable"); if (l.seller_id === req.user.id) throw E(400, "own listing"); if (l.stock < n) throw E(409, "not enough stock");
-    const { rows: [fs] } = await c.query("select greatest(1,floor(base_cents*(100-percent)/100.0))::int p from flash_sales where listing_id=$1 and ends_at>now() and starts_at<=now() and cancelled_at is null and base_cents=$2 order by ends_at desc limit 1", [l.id, l.price_cents]), unit = fs?.p || l.price_cents;
+    const unit = l.price_cents;
     const { rows: [o] } = await c.query("insert into orders(listing_id,buyer_id,seller_id,unit_price_cents,quantity,total_cents,currency) values($1,$2,$3,$4,$5,$6,$7) returning *", [l.id, req.user.id, l.seller_id, unit, n, unit * n, l.currency]);
     await ev(c, o.id, "pending_payment", req.user.id); return o;
   }));
@@ -145,7 +146,7 @@ app.post("/api/orders/:id/status", need, wrap(async (req, res) => {
   res.json(await tx(async c => {
     const { rows: [o] } = await c.query("select * from orders where id=$1 for update", [req.params.id]);
     if (!o || !t[1](o).includes(req.user.id)) throw E(404, "not found"); if (o.status !== t[0]) throw E(409, "transition not allowed");
-    await c.query("update orders set status=$2,updated_at=now() where id=$1", [o.id, req.body.status]); await ev(c, o.id, req.body.status, req.user.id); if (req.body.status === "completed") await hooks.settleOrder?.(c, o, "seller"); return { ok: true };
+    await c.query("update orders set status=$2,updated_at=now() where id=$1", [o.id, req.body.status]); await ev(c, o.id, req.body.status, req.user.id); if (req.body.status === "completed") await hooks.settleOrder?.(c, o, "seller"); hooks.pushSys?.(await hooks.sysMsg?.(c, o.id, req.body.status, req.user.id)); return { ok: true };
   }));
 }));
 app.post("/api/orders/:id/dispute", need, wrap(async (req, res) => {
@@ -154,7 +155,7 @@ app.post("/api/orders/:id/dispute", need, wrap(async (req, res) => {
     const { rows: [o] } = await c.query("select * from orders where id=$1 for update", [req.params.id]);
     if (!o || ![o.buyer_id, o.seller_id].includes(req.user.id)) throw E(404, "not found"); if (!["paid", "in_progress", "completed"].includes(o.status)) throw E(409, "dispute not available");
     await c.query("insert into disputes(order_id,opened_by,reason) values($1,$2,$3)", [o.id, req.user.id, reason]);
-    await c.query("update orders set status='dispute',updated_at=now() where id=$1", [o.id]); await ev(c, o.id, "dispute", req.user.id); r2.notifyStaff("Новый спор по заказу " + o.id.slice(0, 8) + ". Откройте админ-панель сайта."); return { ok: true };
+    await c.query("update orders set status='dispute',updated_at=now() where id=$1", [o.id]); await ev(c, o.id, "dispute", req.user.id); r2.notifyStaff("Новый спор по заказу " + o.id.slice(0, 8) + ". Откройте админ-панель сайта."); hooks.pushSys?.(await hooks.sysMsg?.(c, o.id, "dispute", req.user.id)); return { ok: true };
   }));
 }));
 app.post("/api/orders/:id/review", need, wrap(async (req, res) => {
@@ -182,6 +183,7 @@ const pairConv = async (a, b) => {
   const [n] = await q("select count(*)::int n from conversations where buyer_id=$1 and created_at>now()-interval '1 hour'", [a]); if (n.n >= 20) throw E(429, "too many new chats");
   await q("insert into conversations(listing_id,buyer_id,seller_id) values(null,$1,$2) on conflict do nothing", [a, b]); [c] = await f(); return c;
 };
+sysmsg(hooks, push);
 app.post("/api/conversations", need, wrap(async (req, res) => {
   if (!req.body?.listingId && req.body?.username) {
     const [t] = await q("select id from users where username=$1", [String(req.body.username)]); if (!t) throw E(404, "user not found"); if (t.id === req.user.id) throw E(400, "own profile");
@@ -198,7 +200,7 @@ const part = async (id, uid) => { const [c] = await q("select * from conversatio
 app.get("/api/conversations/:id/messages", need, wrap(async (req, res) => {
   await part(req.params.id, req.user.id);
   await q("update messages set read_at=now() where conversation_id=$1 and sender_id<>$2 and read_at is null", [req.params.id, req.user.id]);
-  res.json(await q("select m.id,m.sender_id,m.body,m.created_at,m.read_at,m.listing_id,l.title lot_title,(select json_agg(json_build_object('id',a.id,'name',a.name,'mime',a.mime,'size',a.size)) from attachments a where a.message_id=m.id) atts from messages m left join listings l on l.id=m.listing_id where m.conversation_id=$1 order by m.created_at limit 500", [req.params.id]));
+  res.json(await q("select m.id,m.sender_id,m.body,m.created_at,m.read_at,m.listing_id,m.kind,m.order_id,su.username sender_name,su.role sender_role,l.title lot_title,(select json_agg(json_build_object('id',a.id,'name',a.name,'mime',a.mime,'size',a.size)) from attachments a where a.message_id=m.id) atts from messages m join users su on su.id=m.sender_id left join listings l on l.id=m.listing_id where m.conversation_id=$1 order by m.created_at limit 500", [req.params.id]));
 }));
 app.post("/api/conversations/:id/messages", need, wrap(async (req, res) => {
   const body = String(req.body?.body || "").trim() || (req.body?.attachmentId ? "[вложение]" : ""); if (!body || body.length > 2000) throw E(400, "body 1-2000 chars");

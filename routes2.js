@@ -252,7 +252,21 @@ export default function routes2(app, { q, pool, tx, E, wrap, need, online, B, ho
     const { status, resolution } = req.body || {}; if (!["resolved_buyer", "resolved_seller", "closed"].includes(status) || String(resolution || "").length < 5) throw E(400, "status and reason required");
     await q("update disputes set status=$2,resolution=$3,resolved_by=$4 where id=$1", [req.params.id, status, String(resolution).slice(0, 2000), req.user.id]); await audit(req.user.id, "dispute_resolve", "dispute", req.params.id, { status });
     if (status !== "closed" && hooks.settleOrder) await tx(async c => { const { rows: [o] } = await c.query("select o.* from disputes d join orders o on o.id=d.order_id where d.id=$1 for update of o", [req.params.id]); if (o) await hooks.settleOrder(c, o, status === "resolved_buyer" ? "buyer" : "seller"); });
+    await tx(async c => { const { rows: [d] } = await c.query("select order_id from disputes where id=$1", [req.params.id]); if (d) hooks.pushSys?.(await hooks.sysMsg?.(c, d.order_id, status, req.user.id)); });
     res.json({ ok: true });
+  }));
+  // модератор пишет прямо в общий чат сторон спора: оба участника видят сообщение в обычном чате и на странице заказа
+  app.post("/api/admin/disputes/:id/chat", need, staff(...ST), wrap(async (req, res) => {
+    const body = String(req.body?.body || "").trim(); if (!body || body.length > 2000) throw E(400, "body 1-2000 chars");
+    const [d] = await q("select d.id,d.status,o.id order_id,o.buyer_id,o.seller_id,o.number from disputes d join orders o on o.id=d.order_id where d.id=$1", [req.params.id]); if (!d) throw E(404, "not found");
+    if (!["open", "in_review", "awaiting_info"].includes(d.status)) throw E(409, "dispute closed");
+    const m = await tx(async c => {
+      let { rows: [cv] } = await c.query("select id from conversations where least(buyer_id,seller_id)=least($1::uuid,$2::uuid) and greatest(buyer_id,seller_id)=greatest($1::uuid,$2::uuid) limit 1", [d.buyer_id, d.seller_id]);
+      if (!cv) { await c.query("insert into conversations(listing_id,buyer_id,seller_id) values(null,$1,$2) on conflict do nothing", [d.buyer_id, d.seller_id]); ({ rows: [cv] } = await c.query("select id from conversations where least(buyer_id,seller_id)=least($1::uuid,$2::uuid) and greatest(buyer_id,seller_id)=greatest($1::uuid,$2::uuid) limit 1", [d.buyer_id, d.seller_id])); }
+      const { rows: [x] } = await c.query("insert into messages(conversation_id,sender_id,body,kind,order_id) values($1,$2,$3,'staff',$4) returning id,conversation_id,sender_id,body,created_at,listing_id,kind,order_id", [cv.id, req.user.id, body, d.order_id]);
+      const { rows: [u] } = await c.query("select username,role from users where id=$1", [req.user.id]); x.sender_name = u.username; x.sender_role = u.role; x._to = [d.buyer_id, d.seller_id]; return x;
+    });
+    hooks.pushSys?.(m); await audit(req.user.id, "dispute_chat", "dispute", d.id, {}); res.json({ ok: true });
   }));
 
   // ---- вложения (приватный бакет Supabase Storage, доступ только по короткоживущим ссылкам)

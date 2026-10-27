@@ -26,6 +26,15 @@ export default function routes4(app, { q, pool, tx, E, wrap, need, pushUser, L, 
     const [n] = await q("insert into news(author_id,title,body,media_ids) values($1,$2,$3,$4) returning id", [req.user.id, title, body, ids]);
     await audit(req.user.id, "news.create", "news", n.id, { title }); res.status(201).json(n);
   }));
+  app.patch("/api/admin/news/:id", need, staff(...AD), wrap(async (req, res) => {
+    if (!uuid(req.params.id)) throw E(404, "not found"); const b = req.body || {}, title = String(b.title || "").trim(), body = String(b.body || "").trim();
+    if (title.length < 3 || title.length > 120 || body.length > 4000) throw E(400, "invalid input");
+    const [n] = await q("select media_ids from news where id=$1", [req.params.id]); if (!n) throw E(404, "not found");
+    const keep = (n.media_ids || []).filter(id => (Array.isArray(b.keep) ? b.keep : []).includes(id)), add = [...new Set((Array.isArray(b.media) ? b.media : []).filter(uuid))];
+    if (add.length) { const r = await q("select id from media where id=any($1) and owner_id=$2 and kind='news'", [add, req.user.id]); if (r.length !== add.length) throw E(400, "bad media"); }
+    await q("update news set title=$2,body=$3,media_ids=$4 where id=$1", [req.params.id, title, body, [...keep, ...add].slice(0, 6)]);
+    await audit(req.user.id, "news.edit", "news", req.params.id, { title }); res.json({ ok: true });
+  }));
   app.delete("/api/admin/news/:id", need, staff(...AD), wrap(async (req, res) => {
     if (!uuid(req.params.id)) throw E(404, "not found");
     await q("delete from news where id=$1", [req.params.id]); await audit(req.user.id, "news.delete", "news", req.params.id); res.json({ ok: true });
@@ -81,9 +90,10 @@ export default function routes4(app, { q, pool, tx, E, wrap, need, pushUser, L, 
 
   // ---------- час распродажи ----------
   app.get("/api/flash", wrap(async (_req, res) => {
-    res.json(await q(`select ${L.LCOLS} ${L.LFROM} where l.status='active' and fs.ends_at is not null order by fs.ends_at asc limit 12`));
+    res.json([]);
   }));
   app.post("/api/flash", need, wrap(async (req, res) => {
+    throw E(410, "flash sales are disabled");
     const b = req.body || {}, minutes = +b.minutes, percent = +b.percent;
     if (!uuid(b.listingId) || !Number.isInteger(minutes) || minutes < 30 || minutes > 60 || !Number.isInteger(percent) || percent < 5 || percent > 70) throw E(400, "invalid input");
     if (!(await codeOk(req.user.id))) throw E(403, "sign seller code first");
