@@ -12,7 +12,8 @@ Object.assign(ERR, {
 const IC4 = {
   shield: "M12 2l8 3v6c0 5-3.400 9.400-8 11-4.600-1.600-8-6-8-11V5z",
   bolt: "M13.500 2L4 14h6.500L9.500 22 20 9.500h-6.600z",
-  swords: "M4 3l7 7-2 2-7-7zM20 3l-7 7 2 2 7-7zM9 14l-5 5 1 1 5-5zM15 14l5 5-1 1-5-5z",
+  swords: "M19.780 4.220L18.360 8.460 11.290 15.540 8.460 12.710 15.540 5.640zM5.640 9.880L14.120 18.360 12.350 20.130 3.870 11.650zM7.400 15.180L8.820 16.600 6.340 19.070 4.930 17.660zM3.300 19.300a1.400 1.400 0 1 0 2.800 0a1.400 1.400 0 1 0-2.800 0z",
+  box: "M12 2L3 6.500v11L12 22l9-4.500v-11zM12 4.300l5.800 2.900L12 10 6.200 7.200zM5 8.800l6 3v7.400l-6-3zm14 0v7.400l-6 3v-7.400z",
   users: "M9 11a4 4 0 100-8 4 4 0 000 8zm8 0a3 3 0 100-6 3 3 0 000 6zM2 21a7 7 0 0114 0zm15-6a6 6 0 015 6h-5z",
   news: "M4 4h13v16H6a2 2 0 01-2-2zm13 3h3v11a2 2 0 01-2 2h-1zM7 8h7v2H7zm0 4h7v2H7z",
   trophy: "M7 3h10v5a5 5 0 01-10 0zM4.500 4H2v2.500A3.500 3.500 0 005.500 10M19.500 4H22v2.500a3.500 3.500 0 01-3.500 3.500M11 14h2v4h3.500v3h-9v-3H11z"
@@ -154,7 +155,7 @@ async function groupPage(id) {
   setTimeout(tick, 0);
   return `<div class="row bet" style="margin:12px 0"><a class="bk" onclick="go('/l/${g.listing_id}')">‹</a><h1 style="font-size:19px;flex:1" class="h2i">${ic4("users", 20)}Совместная покупка</h1></div><div class="card"><b style="overflow-wrap:anywhere">${esc(g.title)}${g.qty > 1 ? " ×" + g.qty : ""}</b><div class="m">Продавец: ${esc(g.seller)}</div><div class="gsum"><div><small class="m">Всего</small><b>${rub(g.total_cents)}</b></div><div><small class="m">${esc(g.initiator)}</small><b>${rub(g.initiator_cents)}</b></div><div><small class="m">${g.partner ? esc(g.partner) : "Партнёр"}</small><b>${rub(g.partner_cents)}</b></div></div><div class="row bet"><span class="tag">${ST4[g.expired ? "expired" : g.status]}</span>${open ? `<small class="m">осталось <i data-end="${g.expires_at}">--:--</i></small>` : ""}</div></div>${g.terms ? `<div class="card"><small class="m">Условия</small><p style="margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere">${esc(g.terms)}</p></div>` : ""}<p class="m"><small>Заказ оформляется на ${esc(g.initiator)}, партнёр видит его в своих покупках. Оплата пока не подключена: деньги не списываются и не удерживаются, фиксируются только условия и доли.</small></p><div class="row">${act4}</div>`;
 }
-function copyText(t) { (navigator.clipboard?.writeText(t) || Promise.reject()).then(() => toast("Ссылка скопирована")).catch(() => toast("Скопируйте адрес из строки браузера")) }
+function copyText(t) { (navigator.clipboard?.writeText(t) || Promise.reject()).then(() => toast("Скопировано")).catch(() => toast("Скопируйте адрес из строки браузера")) }
 const groupJoin = id => ask("Принять условия и присоединиться? Будет создан заказ, деньги не списываются: оплата не подключена.", "Присоединиться", act(async () => { await api(`/groups/${id}/join`, { method: "POST" }); toast("Вы присоединились"); go("/orders") }));
 const groupCancel = act(async id => { await api(`/groups/${id}/cancel`, { method: "POST" }); toast("Отменено"); route() });
 
@@ -162,10 +163,18 @@ const groupCancel = act(async id => { await api(`/groups/${id}/cancel`, { method
 function achBtn(u) { const p = u.progress; if (!p) return ""; window._achU = u; const n = [p.deals, p.fast, p.top].filter(x => x.earned).length; return `<button class="btn sm achbtn" onclick="achOpen()">${ic4("trophy", 14)} Ачивки ${n}/3</button>` }
 function achOpen() { mdl(`<h3 style="margin-top:0">Ачивки</h3>${achBlock(window._achU)}`) }
 
+// ---- номер заказа в системном сообщении кликабелен: ведёт на настоящую страницу заказа (защита от подделок в чате)
+function ordLink(h, oid) { return oid ? h.replace(/#[0-9A-F]{6,12}/g, x => `<a class="onum" onclick="go('/order/${oid}')">${x}</a>`) : h }
+// ---- автовыдача: данные товара от продавца, с кнопкой копирования
+function autoBub(m) {
+  const lines = String(m.body || "").split("\n"), head = lines.shift() || "", items = lines.filter(Boolean);
+  return `<div class="fsys fauto" id="m${m.id}"><div class="otn"><b>Автовыдача</b><span class="tag">мгновенно</span><time>${new Date(m.created_at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</time></div><div class="otb"><i><svg viewBox="0 0 24 24" width="14" height="14"><path d="M13 2 4 14h6l-1 8 9-12h-6z" fill="currentColor"/></svg></i><div class="aitm"><p>${ordLink(esc(head), m.order_id)}</p>${items.map(x => `<div class="ait"><code>${esc(x)}</code><button class="btn sm" onclick="copyText(this.previousElementSibling.textContent)">Копировать</button></div>`).join("")}</div></div></div>`;
+}
 // ---- чат: лента сообщений в стиле маркетплейса
 window.CHO = "";
 function bubx(m) {
-  if (m.kind === "system") return `<div class="fsys" id="m${m.id}"><div class="otn"><b>Система</b><span class="tag">оповещение</span><time>${new Date(m.created_at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</time></div><div class="otb"><i>i</i><p>${esc(m.body)}${m.order_id ? ` <a class="lk" onclick="go('/order/${m.order_id}')">Открыть заказ</a>` : ""}</p></div></div>`;
+  if (m.kind === "system") return `<div class="fsys" id="m${m.id}"><div class="otn"><b>Система</b><span class="tag">оповещение</span><time>${new Date(m.created_at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</time></div><div class="otb"><i>i</i><p>${ordLink(esc(m.body), m.order_id)}${m.order_id ? ` <a class="lk" onclick="go('/order/${m.order_id}')">Открыть заказ</a>` : ""}</p></div></div>`;
+  if (m.kind === "auto") return autoBub(m);
   const mine = m.sender_id === ME.id, c = window.CHA || {}, name = mine ? ME.username : (m.sender_name || c.n || window.CHO || "Собеседник"), stf = m.kind === "staff" ? `<span class="tag">модератор</span>` : "", txt = m.body === "[вложение]" ? "" : esc(m.body), need = !mine && window.TR && TR.lang() && txt;
   const av = mine ? avs(ME.username, ME.avatar_media, false, ME.theme && ME.theme.avatar_preset) : avs(name, c.m, c.on, c.p);
   const lot = m.lot_title && m.listing_id ? `<a class="lotc" onclick="go('/l/${m.listing_id}')">По лоту: ${esc(m.lot_title)}</a>` : "";
@@ -317,7 +326,13 @@ const payConfirm = act(async id => {
   if (o.status !== "pending_payment") throw new Error("Заказ уже не ждёт оплаты");
   window._pay = { id, need: Math.ceil(-left), test: f.test_mode };
   const unit = o.unit_price_cents / 100;
-  mdl(`<h3 style="margin:0 0 2px">Оформление заказа</h3><p class="m" style="margin:0 0 10px">Заказ #${esc(o.number || "")}</p>${ckSteps(0)}<div class="pcf"><div><span>Товар</span><b style="text-align:right">${esc(o.title)}</b></div><div><span>Цена × количество</span><b>${fm(unit)} × ${o.quantity}</b></div><div><span>Способ оплаты</span><b>Баланс DonutPay</b></div><div><span>Ваш баланс</span><b>${fm(f.balance)}</b></div>${o.discount_cents > 0 ? `<div><span>Скидка по промокоду</span><b class="okt">−${fm(o.discount_cents / 100)}</b></div>` : ""}<div><span>К оплате</span><b style="font-size:17px">${fm(sum)}</b></div></div><div class="pmr"><input id="pmc" placeholder="Промокод" maxlength="32" autocapitalize="characters" value="" style="text-transform:uppercase"><button class="btn" onclick="promoApply('${id}')">Применить</button>${o.discount_cents > 0 ? `<button class="btn" onclick="promoApply('${id}',true)">Убрать</button>` : ""}</div><p class="m" style="margin:10px 0 4px">Деньги резервируются на сайте и переходят продавцу только после того, как вы подтвердите получение товара. При споре их вернёт модератор.</p>${f.test_mode ? `<p class="m" style="margin:0 0 10px"><small>Баланс тестовый: реальные деньги не списываются. Оплата картой и СБП появится позже.</small></p>` : ""}${enough ? `<button class="btn pri" style="width:100%" onclick="payDo()">Оплатить ${fm(sum)}</button>` : f.test_mode ? `<p class="neg2" style="margin:0 0 8px">Не хватает ${fm(-left)}</p><button class="btn pri" style="width:100%" onclick="payTop()">Пополнить на ${fm(Math.max(10, window._pay.need))} и оплатить</button>` : `<button class="btn" style="width:100%" onclick="$('#md').remove();go('/finance')">Перейти в финансы</button>`}<button class="btn" style="width:100%;margin-top:8px" onclick="$('#md').remove()">Оплатить позже</button>`);
+  const pr = o.promo, pct = pr && pr.kind === "percent" ? +pr.value : 0, gross = (+o.unit_price_cents * o.quantity) / 100;
+  const pBtn = enough ? `<button class="btn pri big" style="width:100%" onclick="payDo()">Оплатить ${fm(sum)}</button>` : f.test_mode ? `<div class="ckw">Не хватает ${fm(-left)}</div><button class="btn pri big" style="width:100%" onclick="payTop()">Пополнить на ${fm(Math.max(10, window._pay.need))} и оплатить</button>` : `<button class="btn big" style="width:100%" onclick="$('#md').remove();go('/finance')">Перейти в финансы</button>`;
+  mdl(`<div class="ckh"><div><h3>Оформление заказа</h3><small class="m">Заказ #${esc(o.number || "")}</small></div></div>${ckSteps(0)}
+<div class="ckp">${o.image_media ? `<img src="/api/media/${o.image_media}" alt="">` : `<span class="ckpi">${ic4("box", 22)}</span>`}<div class="ckpb"><small>${esc(o.game_name || "")}${o.category_name ? " · " + esc(o.category_name) : ""}</small><b>${esc(o.title)}</b><small>Продавец: ${esc(o.seller_name || "")}${o.quantity > 1 ? " · " + o.quantity + " шт." : ""}</small>${o.auto_delivery ? `<span class="abd"><svg viewBox="0 0 24 24" width="12" height="12"><path d="M13 2 4 14h6l-1 8 9-12h-6z" fill="currentColor"/></svg>Автовыдача: товар придёт в чат сразу</span>` : ""}</div></div>
+${pr ? `<div class="ckpr"><span><b>${esc(pr.code)}</b>${pct ? ` · скидка ${pct}%` : ""}</span><a onclick="promoApply('${id}',true)">Убрать</a></div>` : `<div class="pmr"><input id="pmc" placeholder="Промокод" maxlength="32" autocapitalize="characters" value="" style="text-transform:uppercase"><button class="btn" onclick="promoApply('${id}')">Применить</button></div>`}
+<div class="cksum"><div><span>Цена${o.quantity > 1 ? " × " + o.quantity : ""}</span><b>${fm(gross)}</b></div>${o.discount_cents > 0 ? `<div><span>Скидка${pct ? " " + pct + "%" : ""}</span><b class="okt">−${fm(o.discount_cents / 100)}</b></div>` : ""}<div><span>Способ оплаты</span><b>Баланс DonutPay</b></div><div><span>Ваш баланс</span><b>${fm(f.balance)}</b></div><div class="tot"><span>К оплате</span><b>${fm(sum)}</b></div></div>
+<div class="ckg">${ic4("shield", 18)}<p>Деньги у продавца только после того, как вы подтвердите получение товара. При споре их вернёт модератор.${f.test_mode ? " Баланс тестовый: реальные деньги не списываются, оплата картой и СБП появится позже." : ""}</p></div>${pBtn}`);
 });
 const payDo = act(async () => {
   if (window._paying) return; window._paying = 1; const id = window._pay.id;
