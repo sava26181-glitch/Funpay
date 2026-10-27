@@ -132,7 +132,9 @@ export default function routes2(app, { q, pool, tx, E, wrap, need, online, B, ho
     let img = l.image_media; if (b.image === null) img = null; else if (b.image) { const [m] = await q("select id from media where id=$1 and owner_id=$2 and kind='listing'", [b.image, req.user.id]); if (!m) throw E(400, "bad image"); img = m.id; }
     const st = b.status === "archived" ? "archived" : "pending";
     const [gm] = await q("select count(*)::int n, (count(*) filter (where category_id=$2))::int ok from game_categories where game_id=$1", [l.game_id, cat]); if (gm.n > 0 && gm.ok === 0) throw E(400, "category not available for this game");
-    await q("update listings set title=$2,summary=$3,details=$4,price_cents=$5,stock=$6,delivery_time=$7,category_id=$8,attrs=$9,image_media=$10,status=$11,after_msg=$12,allow_group=$13,deactivate_on_sale=$14,mod_reason=null,updated_at=now() where id=$1", [l.id, b.title, String(b.summary || "").slice(0, 300), String(b.details || "").slice(0, 3000), price, stock, String(b.delivery_time || "").slice(0, 40), cat, cleanAttrs(b.attrs), img, st, String(b.after_msg || "").slice(0, 2000), b.allow_group === true, b.deactivate_on_sale === true]);
+    let aItems = l.auto_items, aOn = l.auto_delivery, stock2 = stock; if (aOn && aItems) stock2 = aItems.length;
+    if (b.auto_items !== undefined) { const ai = hooks.autoClean(b.auto_items); if (ai) { aItems = ai; aOn = true; stock2 = ai.length } else { aItems = null; aOn = false } }
+    await q("update listings set auto_items=$15,auto_delivery=$16,title=$2,summary=$3,details=$4,price_cents=$5,stock=$6,delivery_time=$7,category_id=$8,attrs=$9,image_media=$10,status=$11,after_msg=$12,allow_group=$13,deactivate_on_sale=$14,mod_reason=null,updated_at=now() where id=$1", [l.id, b.title, String(b.summary || "").slice(0, 300), String(b.details || "").slice(0, 3000), price, stock2, String(b.delivery_time || "").slice(0, 40), cat, cleanAttrs(b.attrs), img, st, String(b.after_msg || "").slice(0, 2000), b.allow_group === true, b.deactivate_on_sale === true, aItems, aOn]);
     hooks.priceChanged?.(l.id); res.json({ id: l.id, status: st });
   }));
 

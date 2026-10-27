@@ -71,7 +71,8 @@ export default function routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUs
     const type = String(req.query.type || "all"), [w] = await q("select balance from wallets where user_id=$1", [req.user.id]);
     const f = { in: "l.amount>0", out: "l.amount<0 and l.kind<>'withdraw'", withdraw: "l.kind in ('withdraw','withdraw_refund')", all: "true" }[type] || "true";
     const ops = await q(`select l.id,l.kind,l.amount,l.created_at,l.ref_type,l.ref_id,o.number order_number,w.status w_status from ledger_entries l left join orders o on l.ref_type='order' and o.id::text=l.ref_id left join withdrawals w on l.ref_type='withdrawal' and w.id::text=l.ref_id where l.user_id=$1 and ${f} order by l.id desc limit 100`, [req.user.id]);
-    res.json({ balance: Number(w?.balance || 0), test_mode: TEST(), ops: ops.map(x => ({ ...x, amount: Number(x.amount) })) });
+    const [tt] = await q("select coalesce(sum(amount) filter (where amount>0),0) inn,coalesce(-sum(amount) filter (where amount<0 and kind<>'withdraw'),0) outt from ledger_entries where user_id=$1", [req.user.id]), [pw] = await q("select coalesce(sum(amount),0) s from withdrawals where user_id=$1 and status='pending'", [req.user.id]);
+    res.json({ totals: { in: Number(tt.inn), out: Number(tt.outt), pending: Number(pw.s) }, balance: Number(w?.balance || 0), test_mode: TEST(), ops: ops.map(x => ({ ...x, amount: Number(x.amount) })) });
   }));
   app.post("/api/finance/topup", need, wrap(async (req, res) => {
     if (!TEST()) throw E(403, "test top-up disabled");
@@ -94,16 +95,25 @@ export default function routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUs
       const { rows: [o] } = await c.query("select * from orders where id=$1 for update", [req.params.id]);
       if (!o || o.buyer_id !== req.user.id) throw E(404, "not found"); if (o.status !== "pending_payment") throw E(409, "order is not awaiting payment"); if (o.partner_id) throw E(409, "balance payment is not available for group orders yet");
       if (o.promo_id) { const bad = await promoCheck(c, o.promo_id, o.buyer_id, o.id, Number(o.total_cents) + Number(o.discount_cents)); if (bad) throw E(409, "Промокод больше не действует: " + PERR[bad] + ". Уберите его и оплатите снова"); await c.query("insert into promo_uses(promo_id,user_id,order_id,discount_cents) values($1,$2,$3,$4) on conflict do nothing", [o.promo_id, o.buyer_id, o.id, o.discount_cents]); await c.query("update promo_codes set uses=uses+1 where id=$1", [o.promo_id]); }
+      const { rows: [al] } = await c.query("select auto_delivery,auto_items from listings where id=$1 for update", [o.listing_id]);
+      if (al?.auto_delivery && (al.auto_items || []).length < o.quantity) throw E(409, "Товар закончился: продавец ещё не пополнил автовыдачу");
       await move(c, o.buyer_id, "order_payment", -(o.total_cents / 100), "order", o.id, "pay:" + o.id);
       await c.query("update orders set status='paid',payment_status='confirmed',updated_at=now() where id=$1", [o.id]);
       await c.query("insert into order_events(order_id,status,actor_id) values($1,'paid',$2)", [o.id, req.user.id]);
       const { rows: [l] } = await c.query("update listings set status=case when deactivate_on_sale and seller_id<>$2 then 'archived' else status end where id=$1 returning title", [o.listing_id, o.buyer_id]);
       const { rows: [n] } = await c.query("insert into notifications(user_id,type,payload) values($1,'order_paid',$2) returning id,payload", [o.seller_id, { order_id: o.id, number: o.number, title: l?.title || "", amount: o.total_cents / 100 }]);
       const msg = await hooks.sysMsg(c, o.id, "paid", o.buyer_id);
-      return { seller: o.seller_id, buyer: o.buyer_id, n, number: o.number, conv: msg?.conversation_id, msg };
+      let auto = null;
+      if (al?.auto_delivery) {
+        const take = al.auto_items.slice(0, o.quantity), rest = al.auto_items.slice(o.quantity);
+        await c.query("update listings set auto_items=$2,stock=$3 where id=$1", [o.listing_id, rest.length ? rest : null, rest.length]);
+        await c.query("update orders set delivered=$2 where id=$1", [o.id, take.join("\n")]);
+        auto = await hooks.autoMsg(c, o.id, msg?.conversation_id, `Автовыдача, заказ #${o.number}\n` + take.join("\n"));
+      }
+      return { seller: o.seller_id, buyer: o.buyer_id, n, number: o.number, conv: msg?.conversation_id, msg, auto };
     });
     try { pushUser?.(paid.seller, "notify", { id: paid.n.id, type: "order_paid", ...paid.n.payload }); } catch {}
-    try { hooks.pushSys?.(paid.msg); } catch {}
+    try { hooks.pushSys?.(paid.msg); hooks.pushSys?.(paid.auto); } catch {}
     res.json({ ok: true, number: paid.number, conversation: paid.conv });
   }));
   // выплаты: заявки обрабатывает администратор вручную
