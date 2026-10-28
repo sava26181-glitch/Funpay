@@ -1,14 +1,16 @@
 // v11: дуэли магазинов (24 часа, очки за качество, призы: бонус на баланс и буст в каталоге)
 export default function routes6(app, { q, pool, tx, E, wrap, need, hooks, pushUser }) {
   const uuid = s => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || ""));
-  const DUR_H = 24, BUYER_CAP = 150, MIN_ORDER = 5000, MIN_AGE_D = 3, BONUS_PCT = 0.01, BONUS_MAX = 50000, BOOST_H = 12, K = 24;
+  const DUR_H = 24, BUYER_CAP = 150, MIN_ORDER = 5000, MIN_AGE_D = process.env.DUEL_STRICT === "true" ? 3 : 0, BONUS_PCT = 0.01, BONUS_MAX = 50000, BOOST_H = 12, K = 24;
+  const STRICT = process.env.DUEL_STRICT === "true"; // по умолчанию без защиты от накрутки по отпечаткам, чтобы дуэли можно было проверить на тестовых аккаунтах
+  const FP = (col) => STRICT ? `not exists(select 1 from user_fp fa join user_fp fb on fa.kind=fb.kind and fa.hash=fb.hash where fa.user_id=$1 and fb.user_id=${col})` : "true";
   const LEAGUES = [["Бронза", 0], ["Серебро", 500000], ["Золото", 5000000], ["Платина", 30000000]];
   const league = t => { let i = 0; LEAGUES.forEach((l, k) => { if (t >= l[1]) i = k }); return i };
   const lname = i => LEAGUES[i][0];
   // очки продавца за окно [from,to). Возвращает разбивку и события для ленты.
   async function scoreOf(c, seller, cat, opp, from, to, game) {
     const { rows: os } = await c.query(`select o.id,o.buyer_id,o.total_cents,e.created_at at from order_events e join orders o on o.id=e.order_id join listings l on l.id=o.listing_id join users b on b.id=o.buyer_id
-      where e.status='completed' and o.seller_id=$1 and l.category_id=$2 and ($8::uuid is null or l.game_id=$8) and e.created_at>=$3 and e.created_at<$4 and o.buyer_id<>$1 and o.buyer_id<>$5 and o.total_cents>=$6 and b.created_at<=e.created_at-($7||' days')::interval and not exists(select 1 from user_fp fa join user_fp fb on fa.kind=fb.kind and fa.hash=fb.hash where fa.user_id=$1 and fb.user_id=o.buyer_id) order by e.created_at`, [seller, cat, from, to, opp, MIN_ORDER, String(MIN_AGE_D), game || null]);
+      where e.status='completed' and o.seller_id=$1 and l.category_id=$2 and ($8::uuid is null or l.game_id=$8) and e.created_at>=$3 and e.created_at<$4 and o.buyer_id<>$1 and o.buyer_id<>$5 and o.total_cents>=$6 and b.created_at<=e.created_at-($7||' days')::interval and ${FP("o.buyer_id")} order by e.created_at`, [seller, cat, from, to, opp, MIN_ORDER, String(MIN_AGE_D), game || null]);
     const used = new Map(), ev = []; let orders = 0, unique = 0, sum = 0, capped = 0;
     for (const o of os) {
       const first = !used.has(o.buyer_id), raw = 40 + (first ? 30 : 5), room = Math.max(0, BUYER_CAP - (used.get(o.buyer_id) || 0)), pts = Math.min(raw, room);
@@ -21,11 +23,11 @@ export default function routes6(app, { q, pool, tx, E, wrap, need, hooks, pushUs
       from messages m join conversations cv on cv.id=m.conversation_id join listings l on l.id=m.listing_id join users su on su.id=m.sender_id
       where $1 in(cv.buyer_id,cv.seller_id) and m.sender_id<>$1 and m.sender_id<>$5 and l.seller_id=$1 and l.category_id=$2 and ($7::uuid is null or l.game_id=$7) and m.created_at>=$3 and m.created_at<$4 and su.created_at<=m.created_at-($6||' days')::interval
         and not exists(select 1 from messages p where p.conversation_id=m.conversation_id and p.created_at<m.created_at and p.created_at>m.created_at-interval '30 minutes')
-        and not exists(select 1 from user_fp fa join user_fp fb on fa.kind=fb.kind and fa.hash=fb.hash where fa.user_id=$1 and fb.user_id=m.sender_id)
+        and ${FP("m.sender_id")}
       order by m.sender_id,m.created_at`, [seller, cat, from, to, opp, String(MIN_AGE_D), game || null]);
     let speed = 0; for (const x of dg) { const wait = x.reply ? (new Date(x.reply) - new Date(x.at)) / 6e4 : (Math.min(Date.now(), new Date(to)) - new Date(x.at)) / 6e4; let p = 0; if (x.reply && wait <= 5) p = 15; else if (wait > 60) p = -10; if (p) { speed += p; ev.push({ t: x.reply || x.at, pts: p, text: p > 0 ? "Быстрый ответ покупателю (до 5 минут)" : "Покупатель ждал ответа больше часа" }) } }
     speed = Math.max(-50, Math.min(100, speed));
-    const amount = Math.min(300, Math.floor(sum / 10000)), { rows: rv } = await c.query(`select r.rating,r.created_at from reviews r join orders o on o.id=r.order_id join listings l on l.id=o.listing_id where r.seller_id=$1 and l.category_id=$2 and ($6::uuid is null or l.game_id=$6) and r.created_at>=$3 and r.created_at<$4 and r.reviewer_id<>$5 and r.rating>=4 and not exists(select 1 from user_fp fa join user_fp fb on fa.kind=fb.kind and fa.hash=fb.hash where fa.user_id=$1 and fb.user_id=r.reviewer_id) order by r.created_at`, [seller, cat, from, to, opp, game || null]);
+    const amount = Math.min(300, Math.floor(sum / 10000)), { rows: rv } = await c.query(`select r.rating,r.created_at from reviews r join orders o on o.id=r.order_id join listings l on l.id=o.listing_id where r.seller_id=$1 and l.category_id=$2 and ($6::uuid is null or l.game_id=$6) and r.created_at>=$3 and r.created_at<$4 and r.reviewer_id<>$5 and r.rating>=4 and ${FP("r.reviewer_id")} order by r.created_at`, [seller, cat, from, to, opp, game || null]);
     let reviews = 0; for (const r of rv) { const p = r.rating === 5 ? 50 : 20; reviews += p; ev.push({ t: r.created_at, pts: p, text: `Отзыв ${r.rating}★` }) }
     const { rows: [rf] } = await c.query("select count(*)::int n from orders o join listings l on l.id=o.listing_id where o.seller_id=$1 and l.category_id=$2 and ($5::uuid is null or l.game_id=$5) and o.payment_status='refunded' and o.updated_at>=$3 and o.updated_at<$4", [seller, cat, from, to, game || null]);
     const refunds = -40 * rf.n; if (rf.n) ev.push({ t: to < new Date() ? to : new Date(), pts: refunds, text: `Возвраты покупателям: ${rf.n}` });

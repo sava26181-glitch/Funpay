@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import express from "express"; import helmet from "helmet"; import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit"; import bcrypt from "bcryptjs"; import jwt from "jsonwebtoken";
 import pg from "pg"; import routes2 from "./routes2.js"; import routes3 from "./routes3.js"; import routes7 from "./routes7.js";
-import routes6 from "./routes6.js"; import sysmsg from "./sysmsg.js"; import routes4 from "./routes4.js"; import routes5 from "./routes5.js"; import { makeBadges } from "./badges.js"; import fs from "fs"; import path from "path"; import { fileURLToPath } from "url";
+import wf from "./wordfilter.js"; import routes8 from "./routes8.js"; import routes6 from "./routes6.js"; import sysmsg from "./sysmsg.js"; import routes4 from "./routes4.js"; import routes5 from "./routes5.js"; import { makeBadges } from "./badges.js"; import fs from "fs"; import path from "path"; import { fileURLToPath } from "url";
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const { DATABASE_URL, JWT_SECRET, NODE_ENV } = process.env;
 if (!DATABASE_URL || !JWT_SECRET) { console.error("DATABASE_URL and JWT_SECRET are required"); process.exit(1); }
@@ -27,6 +27,7 @@ await pool.query(fs.readFileSync(path.join(dir, "schema_v12.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v13.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v14.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v15.sql"), "utf8"));
+await pool.query(fs.readFileSync(path.join(dir, "schema_v16.sql"), "utf8"));
 
 const app = express(); app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], fontSrc: ["https://fonts.gstatic.com"], scriptSrc: ["'self'", "'unsafe-inline'"], scriptSrcAttr: ["'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:", "https://*.supabase.co"], connectSrc: ["'self'"] } } }));
@@ -62,12 +63,11 @@ app.post("/api/auth/register", lim, wrap(async (req, res) => {
 app.post("/api/auth/login", lim, wrap(async (req, res) => {
   const { email, password } = req.body || {};
   const [u] = await q("select * from users where email=$1", [String(email || "").toLowerCase()]);
-  if (u?.blocked_until && new Date(u.blocked_until) > new Date()) throw E(403, "account blocked");
   if (!u || !(await bcrypt.compare(String(password || ""), u.password_hash))) throw E(401, "wrong email or password");
   setCookie(res, u.id); const { password_hash, ...pub } = u; res.json(pub);
 }));
 app.post("/api/auth/logout", (req, res) => { if (req.user) { subs.get(req.user.id)?.forEach(r => r.end()); subs.delete(req.user.id); lastSeen.delete(req.user.id); } res.clearCookie("t").json({ ok: true }); });
-app.get("/api/me", need, wrap(async (req, res) => { const [u] = await q(`select ${U} from users where id=$1`, [req.user.id]); u ? res.json(u) : res.status(401).json({ error: "auth required" }); }));
+app.get("/api/me", need, wrap(async (req, res) => { const [u] = await q(`select ${U},blocked_until,block_reason,block_hours from users where id=$1`, [req.user.id]); u ? res.json(u) : res.status(401).json({ error: "auth required" }); }));
 app.patch("/api/me", need, wrap(async (req, res) => {
   const b = req.body || [];
   if (b.is_seller === true) { const [c] = await q("select 1 from seller_codes where user_id=$1 and revoked_at is null", [req.user.id]); if (!c) throw E(403, "sign seller code first"); }
@@ -85,6 +85,7 @@ const r4 = routes4(app, { q, pool, tx, E, wrap, need, pushUser, hooks, L: { LCOL
 routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUser });
 routes6(app, { q, pool, tx, E, wrap, need, hooks, pushUser });
 routes7(app, { q, pool, tx, E, wrap, need, hooks, pushUser });
+routes8(app, { q, pool, tx, E, wrap, need, hooks, pushUser, online: uid => online(uid), notifyStaff: t => r2.notifyStaff?.(t) });
 app.get("/api/listings", wrap(async (req, res) => {
   const { game, category, min, max, q: s, seller, sort, offset } = req.query, w = ["l.status='active'"], p = [];
   const add = (c, v) => { p.push(v); w.push(c.replaceAll("?", "$" + p.length)); };
@@ -114,9 +115,11 @@ app.post("/api/listings", need, wrap(async (req, res) => {
   const [gm] = await q("select count(*)::int n, (count(*) filter (where category_id=$2))::int ok from game_categories where game_id=$1", [g.id, c.id]); if (gm.n > 0 && gm.ok === 0) throw E(400, "category not available for this game");
   const attrs = Object.fromEntries(Object.entries(req.body.attrs || {}).filter(([k, v]) => /^[a-z_]{1,30}$/.test(k) && !/pass|pwd|token|secret|key/i.test(k) && ["string", "number"].includes(typeof v)).slice(0, 12).map(([k, v]) => [k, String(v).slice(0, 200)]));
   let img = null; if (req.body.image) { const [m] = await q("select id from media where id=$1 and owner_id=$2 and kind='listing'", [req.body.image, req.user.id]); if (!m) throw E(400, "bad image"); img = m.id; }
-  const ins = () => q("insert into listings(seller_id,game_id,category_id,title,summary,details,price_cents,stock,delivery_time,status,attrs,image_media,after_msg,allow_group,deactivate_on_sale) values($1,$2,$3,$4,$5,$6,$7,$8,$9,'pending',$10,$11,$12,$13,$14) returning id,status", [req.user.id, g.id, c.id, ...lbody(req.body), attrs, img, String(req.body.after_msg || "").slice(0, 2000), req.body.allow_group === true, req.body.deactivate_on_sale === true]);
+  const flag = wf(req.body.title, req.body.summary, req.body.details, Object.values(attrs));
+  const ins = () => q("insert into listings(seller_id,game_id,category_id,title,summary,details,price_cents,stock,delivery_time,status,attrs,image_media,after_msg,allow_group,deactivate_on_sale) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$15,$10,$11,$12,$13,$14) returning id,status", [req.user.id, g.id, c.id, ...lbody(req.body), attrs, img, String(req.body.after_msg || "").slice(0, 2000), req.body.allow_group === true, req.body.deactivate_on_sale === true, flag ? "pending" : "active"]);
   let l; try { [l] = await ins(); } catch (e) { if (e.code !== "42703") throw e; await pool.query("alter table listings add column if not exists after_msg text"); [l] = await ins(); }
   const ai = hooks.autoClean(req.body.auto_items); if (ai) await q("update listings set auto_items=$2,auto_delivery=true,stock=$3 where id=$1", [l.id, ai, ai.length]);
+  if (flag) { await q("update listings set mod_reason=$2 where id=$1", [l.id, "Автопроверка: " + flag]).catch(() => {}); r2.notifyStaff?.("Лот на проверку (" + flag + "): " + String(req.body.title).slice(0, 80)); }
   res.status(201).json(l);
 }));
 app.patch("/api/listings/:id", need, wrap(async (req, res) => {
@@ -198,7 +201,8 @@ app.get("/api/conversations", need, wrap(async (req, res) => {
 const part = async (id, uid) => { const [c] = await q("select * from conversations where id=$1 and $2 in (buyer_id,seller_id)", [id, uid]); if (!c) throw E(404, "not found"); return c; };
 app.get("/api/conversations/:id/messages", need, wrap(async (req, res) => {
   await part(req.params.id, req.user.id);
-  await q("update messages set read_at=now() where conversation_id=$1 and sender_id<>$2 and read_at is null", [req.params.id, req.user.id]);
+  const rd = await q("update messages set read_at=now() where conversation_id=$1 and sender_id<>$2 and read_at is null returning sender_id", [req.params.id, req.user.id]);
+  for (const u of new Set(rd.map(x => x.sender_id))) pushUser(u, "read", { conversation_id: req.params.id });
   res.json(await q("select m.id,m.sender_id,m.body,m.created_at,m.read_at,m.listing_id,m.kind,m.order_id,su.username sender_name,su.role sender_role,l.title lot_title,(select json_agg(json_build_object('id',a.id,'name',a.name,'mime',a.mime,'size',a.size)) from attachments a where a.message_id=m.id) atts from messages m join users su on su.id=m.sender_id left join listings l on l.id=m.listing_id where m.conversation_id=$1 order by m.created_at limit 500", [req.params.id]));
 }));
 app.post("/api/conversations/:id/messages", need, wrap(async (req, res) => {
@@ -218,7 +222,7 @@ app.post("/api/reports", need, wrap(async (req, res) => {
 app.get("/api/admin/listings", need, admin, wrap(async (req, res) => res.json(await q(`select ${LCOLS},l.status ${LFROM} where l.status=$1 order by l.created_at`, [req.query.status || "pending"]))));
 app.post("/api/admin/listings/:id/status", need, admin, wrap(async (req, res) => { if (!["active", "rejected", "archived"].includes(req.body?.status)) throw E(400, "bad status"); await q("update listings set status=$2 where id=$1", [req.params.id, req.body.status]); res.json({ ok: true }); }));
 app.get("/api/admin/disputes", need, admin, wrap(async (_, res) => res.json(await q("select * from disputes order by created_at desc limit 100"))));
-app.post("/api/admin/disputes/:id/resolve", need, admin, wrap(async (req, res) => { if (!["resolved_buyer", "resolved_seller", "closed"].includes(req.body?.status)) throw E(400, "bad status"); await q("update disputes set status=$2,resolution=$3,resolved_by=$4 where id=$1", [req.params.id, req.body.status, String(req.body.resolution || "").slice(0, 2000), req.user.id]); res.json({ ok: true }); }));
+app.post("/api/admin/disputes/:id/resolve", need, admin, wrap(async (req, res) => { if (!["resolved_buyer", "resolved_seller", "closed"].includes(req.body?.status)) throw E(400, "bad status"); await q("update disputes set status=$2,resolution=$3,resolved_by=(select id from users where id=$4) where id=$1", [req.params.id, req.body.status, String(req.body.resolution || "").slice(0, 2000), req.user.id]); res.json({ ok: true }); }));
 app.get("/api/admin/reports", need, admin, wrap(async (_, res) => res.json(await q("select * from reports where status='open' order by created_at desc limit 100"))));
 app.get("/api/admin/users", need, admin, wrap(async (_, res) => res.json(await q("select id,username,email,role,is_seller,created_at from users order by created_at desc limit 200"))));
 app.post("/api/admin/games", need, admin, wrap(async (req, res) => { const { slug, name, platform } = req.body || {}; if (!slug || !name) throw E(400, "slug and name required"); await q("insert into games(slug,name,platform) values($1,$2,$3)", [slug, name, platform || null]); res.status(201).json({ ok: true }); }));

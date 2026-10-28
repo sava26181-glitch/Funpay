@@ -14,7 +14,7 @@ export default function routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUs
   };
   hooks.move = move;
   // ТЕСТОВЫЕ комиссии (пока баланс тестовый): с продажи и при выводе. Меняются переменными окружения.
-  const FEE_SALE = () => Math.min(50, Math.max(0, +(process.env.SALE_FEE_PCT ?? 15))), FEE_WD = () => Math.min(50, Math.max(0, +(process.env.WITHDRAW_FEE_PCT ?? 3))), FEE_DISC = 3;
+  const FEE_SALE = () => Math.min(50, Math.max(0, +(process.env.SALE_FEE_PCT ?? 7.5))), FEE_WD = () => Math.min(50, Math.max(0, +(process.env.WITHDRAW_FEE_PCT ?? 3))), FEE_DISC = 3;
   const salePct = async (c, uid) => { const { rows: [d] } = await c.query("select fee_until from duel_boosts where user_id=$1 and fee_until>now()", [uid]); return { pct: Math.max(0, FEE_SALE() - (d ? FEE_DISC : 0)), until: d?.fee_until || null } };
   // ---- промокоды: создаёт владелец, скидку оплачивает площадка (продавец получает полную сумму минус комиссию)
   const OWN = wrap(async (req, _res, next) => { const [u] = await q("select role from users where id=$1", [req.user.id]); if (u?.role !== "owner") throw E(403, "owner only"); next(); });
@@ -120,10 +120,11 @@ export default function routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUs
   app.get("/api/admin/withdrawals", need, adm, wrap(async (_req, res) => res.json(await q("select w.id,w.amount,w.fee,w.method,w.details,w.status,w.note,w.created_at,u.username from withdrawals w join users u on u.id=w.user_id order by (w.status='pending') desc, w.created_at desc limit 100"))));
   app.post("/api/admin/withdrawals/:id", need, adm, wrap(async (req, res) => {
     if (!uuid(req.params.id)) throw E(404, "not found"); const act = req.body?.action, note = String(req.body?.note || "").slice(0, 300);
-    if (!["paid", "reject"].includes(act)) throw E(400, "bad action");
+    if (!["paid", "reject", "processing"].includes(act)) throw E(400, "bad action");
     await tx(async c => {
-      const { rows: [w] } = await c.query("select * from withdrawals where id=$1 for update", [req.params.id]); if (!w) throw E(404, "not found"); if (w.status !== "pending") throw E(409, "already processed");
-      await c.query("update withdrawals set status=$2,note=$3,resolved_at=now(),resolved_by=$4 where id=$1", [w.id, act === "paid" ? "paid" : "rejected", note, req.user.id]);
+      const { rows: [w] } = await c.query("select * from withdrawals where id=$1 for update", [req.params.id]); if (!w) throw E(404, "not found"); if (!["pending", "processing"].includes(w.status)) throw E(409, "already processed");
+      if (act === "processing") { await c.query("update withdrawals set status='processing' where id=$1", [w.id]); await c.query("insert into audit_log(actor_id,action,target_type,target_id,details) values($1,$2,'withdrawal',$3,$4)", [req.user.id, "withdrawal_processing", w.id, { amount: w.amount }]); return; }
+      await c.query("update withdrawals set status=$2,note=$3,resolved_at=now(),resolved_by=(select id from users where id=$4) where id=$1", [w.id, act === "paid" ? "paid" : "rejected", note, req.user.id]);
       if (act === "reject") await move(c, w.user_id, "withdraw_refund", Number(w.amount), "withdrawal", w.id, "wdr:" + w.id);
       await c.query("insert into audit_log(actor_id,action,target_type,target_id,details) values($1,$2,'withdrawal',$3,$4)", [req.user.id, "withdrawal_" + act, w.id, { amount: w.amount }]);
     });

@@ -1,4 +1,4 @@
-import express from "express"; import crypto from "crypto"; import rateLimit from "express-rate-limit"; import { makeStorage } from "./storage.js";
+import express from "express"; import crypto from "crypto"; import rateLimit from "express-rate-limit"; import { makeStorage } from "./storage.js"; import wf from "./wordfilter.js";
 export default function routes2(app, { q, pool, tx, E, wrap, need, online, B, hooks }) {
   const stor = makeStorage(process.env, process.env.DATABASE_URL);
   stor.ensure().then(r => console.log("[storage]", r)).catch(e => console.error("[storage] ensure failed:", e.message));
@@ -130,11 +130,12 @@ export default function routes2(app, { q, pool, tx, E, wrap, need, online, B, ho
     const [l] = await q("select * from listings where id=$1 and (seller_id=$2 or exists(select 1 from users x where x.id=$2 and x.role in ('admin','owner')))", [req.params.id, req.user.id]); if (!l) throw E(404, "not found");
     let cat = l.category_id; if (b.category) { const [c] = await q("select id from categories where slug=$1", [b.category]); if (!c) throw E(400, "unknown category"); cat = c.id; }
     let img = l.image_media; if (b.image === null) img = null; else if (b.image) { const [m] = await q("select id from media where id=$1 and owner_id=$2 and kind='listing'", [b.image, req.user.id]); if (!m) throw E(400, "bad image"); img = m.id; }
-    const st = b.status === "archived" ? "archived" : "pending";
+    const flag = b.status === "archived" ? null : wf(b.title, b.summary, b.details, Object.values(cleanAttrs(b.attrs))), st = b.status === "archived" ? "archived" : (flag ? "pending" : "active");
     const [gm] = await q("select count(*)::int n, (count(*) filter (where category_id=$2))::int ok from game_categories where game_id=$1", [l.game_id, cat]); if (gm.n > 0 && gm.ok === 0) throw E(400, "category not available for this game");
     let aItems = l.auto_items, aOn = l.auto_delivery, stock2 = stock; if (aOn && aItems) stock2 = aItems.length;
     if (b.auto_items !== undefined) { const ai = hooks.autoClean(b.auto_items); if (ai) { aItems = ai; aOn = true; stock2 = ai.length } else { aItems = null; aOn = false } }
-    await q("update listings set auto_items=$15,auto_delivery=$16,title=$2,summary=$3,details=$4,price_cents=$5,stock=$6,delivery_time=$7,category_id=$8,attrs=$9,image_media=$10,status=$11,after_msg=$12,allow_group=$13,deactivate_on_sale=$14,mod_reason=null,updated_at=now() where id=$1", [l.id, b.title, String(b.summary || "").slice(0, 300), String(b.details || "").slice(0, 3000), price, stock2, String(b.delivery_time || "").slice(0, 40), cat, cleanAttrs(b.attrs), img, st, String(b.after_msg || "").slice(0, 2000), b.allow_group === true, b.deactivate_on_sale === true, aItems, aOn]);
+    await q("update listings set auto_items=$15,auto_delivery=$16,title=$2,summary=$3,details=$4,price_cents=$5,stock=$6,delivery_time=$7,category_id=$8,attrs=$9,image_media=$10,status=$11,after_msg=$12,allow_group=$13,deactivate_on_sale=$14,mod_reason=$17,updated_at=now() where id=$1", [l.id, b.title, String(b.summary || "").slice(0, 300), String(b.details || "").slice(0, 3000), price, stock2, String(b.delivery_time || "").slice(0, 40), cat, cleanAttrs(b.attrs), img, st, String(b.after_msg || "").slice(0, 2000), b.allow_group === true, b.deactivate_on_sale === true, aItems, aOn, flag ? "Автопроверка: " + flag : null]);
+    if (flag) notifyStaff("Лот на проверку (" + flag + "): " + String(b.title).slice(0, 80));
     hooks.priceChanged?.(l.id); res.json({ id: l.id, status: st });
   }));
 
@@ -228,7 +229,7 @@ export default function routes2(app, { q, pool, tx, E, wrap, need, online, B, ho
   const tk = async (id, u) => { const [t] = await q("select t.*,(select role from users where id=$2) role from tickets t where t.id=$1", [id, u]); if (!t) throw E(404, "not found"); const s = ST.includes(t.role); if (t.user_id !== u && !s) throw E(404, "not found"); t.staff = s; return t; };
   app.get("/api/tickets/:id", need, wrap(async (req, res) => { const t = await tk(req.params.id, req.user.id); t.messages = await q("select m.id,m.body,m.internal,m.created_at,u.username author,(m.author_id=t.user_id) is_user,(select json_agg(json_build_object('id',a.id,'name',a.name,'mime',a.mime,'size',a.size)) from attachments a where a.ticket_message_id=m.id) atts from ticket_messages m join tickets t on t.id=m.ticket_id left join users u on u.id=m.author_id where m.ticket_id=$1 and ($2 or not m.internal) order by m.id", [t.id, t.staff]); res.json(t); }));
   app.post("/api/tickets/:id/messages", need, wrap(async (req, res) => {
-    const t = await tk(req.params.id, req.user.id), body = String(req.body?.body || "").trim() || (req.body?.attachmentId ? "[вложение]" : ""); if (!body || body.length > 3000) throw E(400, "body 1-3000 chars");
+    const t = await tk(req.params.id, req.user.id), body = String(req.body?.body || "").trim() || (req.body?.attachmentId ? "[вложение]" : ""); if (!body || body.length > 3000) throw E(400, "Введите сообщение (до 3000 символов)");
     const internal = t.staff && !!req.body.internal; if (t.status === "closed") throw E(409, "ticket closed");
     await tx(async c => { const { rows: [tm] } = await c.query("insert into ticket_messages(ticket_id,author_id,body,internal) values($1,$2,$3,$4) returning id", [t.id, req.user.id, body, internal]); await linkAtt(req.body?.attachmentId, req.user.id, "ticket", "ticket_message_id", tm.id, null, c); });
     await q("update tickets set updated_at=now(),status=case when $2 and not $3 then 'awaiting_user' when not $2 then 'new' else status end where id=$1", [t.id, t.staff && t.user_id !== req.user.id, internal]); res.json({ ok: true });
@@ -244,7 +245,7 @@ export default function routes2(app, { q, pool, tx, E, wrap, need, online, B, ho
     if (d.staff) d.history = await q("select a.action,a.details,a.created_at,u.username from audit_log a left join users u on u.id=a.actor_id where a.target_type='dispute' and a.target_id=$1 order by a.id desc", [d.id]);
     if (d.staff) d.videos = await q("select id,created_at,size,mime from attachments where context='delivery' and ref_id=$1 order by created_at", [d.order_id]); res.json(d); }));
   app.post("/api/disputes/:id/messages", need, wrap(async (req, res) => {
-    const d = await dpart(req.params.id, req.user.id), body = String(req.body?.body || "").trim() || (req.body?.attachmentId ? "[вложение]" : ""); if (!body || body.length > 3000) throw E(400, "body 1-3000 chars");
+    const d = await dpart(req.params.id, req.user.id), body = String(req.body?.body || "").trim() || (req.body?.attachmentId ? "[вложение]" : ""); if (!body || body.length > 3000) throw E(400, "Введите сообщение (до 3000 символов)");
     if (!["open", "in_review", "awaiting_info"].includes(d.status)) throw E(409, "dispute closed");
     await tx(async c => { const { rows: [dm] } = await c.query("insert into dispute_messages(dispute_id,author_id,body,internal) values($1,$2,$3,$4) returning id", [d.id, req.user.id, body, d.staff && !!req.body.internal]); await linkAtt(req.body?.attachmentId, req.user.id, "dispute", "dispute_message_id", dm.id, d.id, c); });
     if (!d.staff && d.status === "awaiting_info") await q("update disputes set status='in_review' where id=$1", [d.id]); res.json({ ok: true });
@@ -252,7 +253,7 @@ export default function routes2(app, { q, pool, tx, E, wrap, need, online, B, ho
   app.post("/api/admin/disputes/:id/status", need, staff(...ST), wrap(async (req, res) => { if (!["open", "in_review", "awaiting_info"].includes(req.body?.status)) throw E(400, "bad status"); const r = await pool.query("update disputes set status=$2 where id=$1 and status in ('open','in_review','awaiting_info')", [req.params.id, req.body.status]); if (!r.rowCount) throw E(409, "dispute closed"); await audit(req.user.id, "dispute_status", "dispute", req.params.id, { status: req.body.status }); res.json({ ok: true }); }));
   app.post("/api/admin/disputes/:id/resolve", need, staff(...ST), wrap(async (req, res) => {
     const { status, resolution } = req.body || {}; if (!["resolved_buyer", "resolved_seller", "closed"].includes(status) || String(resolution || "").length < 5) throw E(400, "status and reason required");
-    await q("update disputes set status=$2,resolution=$3,resolved_by=$4 where id=$1", [req.params.id, status, String(resolution).slice(0, 2000), req.user.id]); await audit(req.user.id, "dispute_resolve", "dispute", req.params.id, { status });
+    await q("update disputes set status=$2,resolution=$3,resolved_by=(select id from users where id=$4) where id=$1", [req.params.id, status, String(resolution).slice(0, 2000), req.user.id]); await audit(req.user.id, "dispute_resolve", "dispute", req.params.id, { status });
     if (status !== "closed" && hooks.settleOrder) await tx(async c => { const { rows: [o] } = await c.query("select o.* from disputes d join orders o on o.id=d.order_id where d.id=$1 for update of o", [req.params.id]); if (o) await hooks.settleOrder(c, o, status === "resolved_buyer" ? "buyer" : "seller"); });
     await tx(async c => { const { rows: [d] } = await c.query("select order_id from disputes where id=$1", [req.params.id]); if (d) hooks.pushSys?.(await hooks.sysMsg?.(c, d.order_id, status, req.user.id)); });
     res.json({ ok: true });
@@ -308,9 +309,9 @@ export default function routes2(app, { q, pool, tx, E, wrap, need, online, B, ho
   app.post("/api/admin/users/:id/block", need, staff(...ST), wrap(async (req, res) => {
     const h = +req.body?.hours, reason = String(req.body?.reason || ""); if (!(h >= 1 && h <= 8760) || reason.length < 3) throw E(400, "hours and reason required");
     const [t] = await q("select role from users where id=$1", [req.params.id]); if (!t || req.params.id === req.user.id || t.role === "owner" || (t.role !== "user" && req.role !== "owner")) throw E(403, "forbidden");
-    await q("update users set blocked_until=now()+($2||' hours')::interval,block_reason=$3 where id=$1", [req.params.id, String(Math.floor(h)), reason.slice(0, 500)]); await audit(req.user.id, "user_block", "user", req.params.id, { hours: h, reason }); res.json({ ok: true });
+    await q("update users set blocked_until=now()+($2||' hours')::interval,block_reason=$3,block_hours=$4 where id=$1", [req.params.id, String(Math.floor(h)), reason.slice(0, 500), Math.floor(h)]); await audit(req.user.id, "user_block", "user", req.params.id, { hours: h, reason }); res.json({ ok: true });
   }));
-  app.post("/api/admin/users/:id/unblock", need, staff(...ST), wrap(async (req, res) => { await q("update users set blocked_until=null,block_reason=null where id=$1", [req.params.id]); await audit(req.user.id, "user_unblock", "user", req.params.id); res.json({ ok: true }); }));
+  app.post("/api/admin/users/:id/unblock", need, staff(...ST), wrap(async (req, res) => { await q("update users set blocked_until=null,block_reason=null,block_hours=null where id=$1", [req.params.id]); await audit(req.user.id, "user_unblock", "user", req.params.id); res.json({ ok: true }); }));
   app.post("/api/admin/users/:id/role", need, staff(...AD), wrap(async (req, res) => {
     const r = req.body?.role; if (!["user", "moderator", "admin"].includes(r) || req.params.id === req.user.id) throw E(400, "bad role");
     const [t] = await q("select role from users where id=$1", [req.params.id]); if (!t || t.role === "owner") throw E(403, "forbidden"); if ((r === "admin" || t.role === "admin") && req.role !== "owner") throw E(403, "only owner can manage admins");
