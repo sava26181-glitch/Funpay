@@ -74,6 +74,25 @@ export default function routes8(app, { q, pool, tx, E, wrap, need, hooks, pushUs
     res.json({ live, last: last || null });
   }));
 
+  // ---- карточка заказа для персонала (участникам заказ открывается обычной страницей)
+  const staffOnly = wrap(async (req, _res, next) => { const [me] = await q("select role from users where id=$1", [req.user.id]); if (!["moderator", "admin", "owner"].includes(me?.role)) throw E(403, "forbidden"); next(); });
+  app.get("/api/admin/orders/by-number/:n", need, staffOnly, wrap(async (req, res) => {
+    const n = String(req.params.n || "").replace(/^#/, "").slice(0, 16); const [o] = await q("select id from orders where upper(number)=upper($1)", [n]); if (!o) throw E(404, "not found"); res.json({ id: o.id });
+  }));
+  app.get("/api/admin/orders/:id", need, staffOnly, wrap(async (req, res) => {
+    if (!uuid(req.params.id)) throw E(404, "not found");
+    const [o] = await q(`select o.id,o.number,o.status,o.payment_status,o.total_cents,o.discount_cents,o.fee_cents,o.quantity,o.unit_price_cents,o.created_at,o.updated_at,o.listing_id,o.buyer_id,o.seller_id,l.title,g.name game_name,c.name category_name,bu.username buyer,su.username seller
+      from orders o join listings l on l.id=o.listing_id join games g on g.id=l.game_id join categories c on c.id=l.category_id join users bu on bu.id=o.buyer_id join users su on su.id=o.seller_id where o.id=$1`, [req.params.id]);
+    if (!o) throw E(404, "not found");
+    const [events, disputes, [hold], messages] = await Promise.all([
+      q("select e.status,e.created_at,u.username from order_events e left join users u on u.id=e.actor_id where e.order_id=$1 order by e.id", [o.id]),
+      q("select id,status,reason,created_at from disputes where order_id=$1 order by created_at", [o.id]),
+      q("select amount::float amount,status from holds where order_id=$1", [o.id]),
+      q(`select m.id,m.body,m.kind,m.created_at,u.username from conversations c join messages m on m.conversation_id=c.id left join users u on u.id=m.sender_id
+         where least(c.buyer_id,c.seller_id)=least($1::uuid,$2::uuid) and greatest(c.buyer_id,c.seller_id)=greatest($1::uuid,$2::uuid) order by m.created_at desc limit 100`, [o.buyer_id, o.seller_id])]);
+    res.json({ ...o, events, disputes, hold: hold || null, messages: messages.reverse() });
+  }));
+
   // ---- счётчики «сколько проверить» для персонала
   app.get("/api/admin/counts", need, wrap(async (req, res) => {
     const [me] = await q("select role from users where id=$1", [req.user.id]); if (!["moderator", "admin", "owner"].includes(me?.role)) throw E(403, "forbidden");
