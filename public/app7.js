@@ -153,7 +153,7 @@
     const frag = document.createElement("div"); frag.className = "lgp";
     for (const [g, cm] of by) {
       const sec = document.createElement("div"); sec.className = "lgg"; sec.innerHTML = `<h3 class="lgh">${E(g)}</h3>`;
-      for (const [c, els] of cm) { const cat = document.createElement("div"); cat.innerHTML = `<div class="lgc">${E(c)} <small>${els.length}</small></div>`; const box = document.createElement("div"); box.className = "rows"; els.forEach(e => box.append(e)); cat.append(box); sec.append(cat) }
+      for (const [c, els] of cm) { const cat = document.createElement("div"); cat.innerHTML = `<div class="lgc">${E(c)}</div>`; const box = document.createElement("div"); box.className = "rows"; els.forEach(e => box.append(e)); cat.append(box); sec.append(cat) }
       frag.append(sec);
     }
     rows.replaceWith(frag);
