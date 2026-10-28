@@ -108,8 +108,6 @@
   // ======================= Админка: счётчики на вкладках и фильтры =======================
   const GROUPS = {
     orders: { a: ["Ожидает оплаты", "Оплачен", "Открыт спор"], p: ["В работе"], n: ["Завершён", "Отменён"] },
-    disputes: { a: ["open"], p: ["in_review", "awaiting_info"], n: ["resolved_buyer", "resolved_seller", "closed"] },
-    tickets: { a: ["Новое"], p: ["Рассматривается", "Ожидает ответа"], n: ["Решено", "Закрыто"] },
     withdrawals: { a: ["Ожидает"], p: ["В обработке"], n: ["Выплачено", "Отклонено"] },
     promos: { a: ["Включён"], p: [], n: ["Выключен"] },
     users: { a: ["__ok"], p: [], n: ["__blocked"] }
@@ -117,6 +115,7 @@
   const cardGroup = (tab, card) => {
     const g = GROUPS[tab]; if (!g) return "a";
     if (tab === "users") return /заблокирован до/.test(card.textContent) ? "n" : "a";
+    if (card.dataset.sg) return card.dataset.sg;
     const tag = (card.querySelector(".tag:last-of-type") || card.querySelector(".tag")); const t = tag ? tag.textContent.trim() : "";
     for (const k of ["a", "p", "n"]) if (g[k].includes(t)) return k;
     return "a";

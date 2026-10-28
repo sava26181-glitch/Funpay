@@ -167,7 +167,7 @@ function achOpen() { mdl(`<h3 style="margin-top:0">Ачивки</h3>${achBlock(w
 function ordLink(h, oid) { return h.replace(/#([0-9A-Fa-f]{6,12})/g, (x, n) => `<a class="onum" onclick="event.stopPropagation();goOrd('${oid || ""}','${n}')">${x}</a>`) }
 function goOrd(oid, n) {
   const staff = typeof isStaff === "function" && isStaff();
-  const adm = () => go("/admin?tab=orders&q=" + encodeURIComponent(n));
+  const adm = async () => { try { const id = oid || (await api("/admin/orders/by-number/" + encodeURIComponent(n))).id; go("/admin?tab=order&id=" + id) } catch { toast("Заказ не найден") } };
   const byNum = () => api("/orders/by-number/" + encodeURIComponent(n)).then(r => go("/order/" + r.id)).catch(e => staff ? adm() : toast("Заказ не найден"));
   if (oid) api("/orders/" + oid).then(() => go("/order/" + oid)).catch(() => staff ? adm() : byNum()); else byNum();
 }

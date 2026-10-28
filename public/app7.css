@@ -162,3 +162,12 @@ body[data-pg="u"] .rw .sl,body[data-pg="shop"] .rw .sl,body[data-pg="my"] .rw .s
 .rw .sl .rsn{font-size:12px}
 .qtyb{margin:2px 0 10px}.qtyh{font-weight:800;font-size:13px;color:var(--m);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px}
 .qtyc a{font-variant-numeric:tabular-nums}
+/* карточка лота: если текста мало, высота прежняя, содержимое по центру */
+.rw2{min-height:112px}
+.rw2 .rb{justify-content:center}
+.rw2 .rmeta{font-size:12px;color:var(--m);opacity:.9}
+/* ===== v21: кружок «в сети» на аватарке профиля, разделы ===== */
+.pf .av2{position:relative;overflow:visible}
+.pf .av2 img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
+.pf .av2 .odot{position:absolute;right:1px;bottom:1px;width:18px;height:18px;border-radius:50%;background:var(--ok);border:3px solid var(--bg);z-index:3;box-shadow:0 0 0 2px color-mix(in srgb,var(--ok) 30%,transparent)}
+.secb{margin:0 0 10px}
