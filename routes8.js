@@ -43,6 +43,7 @@ export default function routes8(app, { q, pool, tx, E, wrap, need, hooks, pushUs
       await c.query("update orders set status=$2,updated_at=now() where id=$1", [o.id, to]);
       await c.query("insert into order_events(order_id,status,actor_id) values($1,$2,$3)", [o.id, to, uid]);
       if (closeDispute) await c.query("update disputes set status='closed',resolution=$2 where order_id=$1 and status in ('open','in_review','awaiting_info')", [o.id, "Покупатель подтвердил выполнение заказа, спор закрыт"]);
+      if (closeDispute) await hooks.releaseHold?.(c, o.id);
       if (to === "completed") await hooks.settleOrder?.(c, o, "seller");
       if (refund) await hooks.settleOrder?.(c, o, "buyer");
       hooks.pushSys?.(await hooks.sysMsg?.(c, o.id, to, uid));
@@ -55,6 +56,9 @@ export default function routes8(app, { q, pool, tx, E, wrap, need, hooks, pushUs
     const [o] = await q("select id from orders where upper(number)=upper($1) and $2 in (buyer_id,seller_id,partner_id)", [n, req.user.id]); if (!o) throw E(404, "not found"); res.json({ id: o.id });
   }));
 
+  // ---- показ ачивок в профиле (по желанию владельца)
+  app.patch("/api/me/badges", need, wrap(async (req, res) => { await q("update users set show_badges=$2 where id=$1", [req.user.id, req.body?.show !== false]); res.json({ ok: true, show_badges: req.body?.show !== false }); }));
+
   // ---- что сейчас смотрит собеседник: видно только продавцу и только его лоты
   const viewing = new Map();
   app.post("/api/viewing", need, wrap(async (req, res) => {
@@ -66,7 +70,7 @@ export default function routes8(app, { q, pool, tx, E, wrap, need, hooks, pushUs
     const [o] = await q("select id from users where username=$1", [String(req.query.username || "")]); if (!o) return res.json({ live: null, last: null });
     const [cv] = await q("select id from conversations where least(buyer_id,seller_id)=least($1::uuid,$2::uuid) and greatest(buyer_id,seller_id)=greatest($1::uuid,$2::uuid) limit 1", [req.user.id, o.id]); if (!cv) return res.json({ live: null, last: null });
     const v = viewing.get(o.id), live = v && Date.now() - v.at < 90000 && v.seller === req.user.id ? { id: v.id, title: v.title } : null;
-    const [last] = await q("select l.id,l.title from messages m join listings l on l.id=m.listing_id where m.conversation_id=$1 and m.listing_id is not null order by m.created_at desc limit 1", [cv.id]);
+    const [last] = await q("select l.id,l.title from messages m join listings l on l.id=m.listing_id where m.conversation_id=$1 and m.listing_id is not null and l.seller_id=$2 order by m.created_at desc limit 1", [cv.id, req.user.id]);
     res.json({ live, last: last || null });
   }));
 

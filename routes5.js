@@ -9,6 +9,7 @@ export default function routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUs
     await c.query("insert into wallets(user_id) values($1) on conflict do nothing", [uid]);
     const { rows: [l] } = await c.query("insert into ledger_entries(user_id,kind,amount,ref_type,ref_id,provider_event_id) values($1,$2,$3,$4,$5,$6) on conflict(provider_event_id) do nothing returning id", [uid, kind, amount, refType || null, refId || null, evid || null]);
     if (!l) return false;
+    if (amount < 0 && kind !== "dispute_capture") { const { rows: [h] } = await c.query("select coalesce((select sum(amount) from holds where user_id=$1 and status='held'),0) h,(select balance from wallets where user_id=$1 for update) b", [uid]); if (Number(h.b) + amount < Number(h.h) - 1e-9) throw E(409, "Часть средств заморожена из-за открытого спора. Доступно: " + Math.max(0, Number(h.b) - Number(h.h)).toFixed(2) + " ₽"); }
     try { await c.query("update wallets set balance=balance+$2 where user_id=$1", [uid, amount]); } catch (e) { if (e.code === "23514" || /check constraint/.test(e.message)) throw E(409, "not enough funds"); throw e; }
     return true;
   };
@@ -67,12 +68,34 @@ export default function routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUs
     if (done) await c.query("insert into notifications(user_id,type,payload) values($1,$2,$3)", [to === "buyer" ? o.buyer_id : o.seller_id, to === "buyer" ? "order_refund" : "order_payout", { order_id: o.id, number: o.number, amount: to === "buyer" ? ref : amt, fee: fee / 100 }]);
     return done;
   };
+  // заморозка: спор по уже выплаченному заказу. Деньги продавца остаются на его балансе, но вывести/потратить их нельзя
+  hooks.holdForDispute = async (c, o) => {
+    const { rows: [p] } = await c.query("select amount from ledger_entries where provider_event_id=$1 and kind='order_payout'", ["settle:" + o.id]); if (!p) return false;
+    const { rows: [w] } = await c.query("select balance from wallets where user_id=$1 for update", [o.seller_id]);
+    const { rows: [h0] } = await c.query("select coalesce(sum(amount),0) h from holds where user_id=$1 and status='held'", [o.seller_id]);
+    const free = Math.max(0, Number(w?.balance || 0) - Number(h0.h)), amt = Math.min(Number(p.amount), free);
+    await c.query("insert into holds(order_id,user_id,amount) values($1,$2,$3) on conflict(order_id) do update set status='held',amount=excluded.amount,closed_at=null", [o.id, o.seller_id, amt]);
+    await c.query("insert into notifications(user_id,type,payload) values($1,'balance_hold',$2)", [o.seller_id, { order_id: o.id, number: o.number, amount: amt }]).catch(() => {});
+    return true;
+  };
+  hooks.releaseHold = async (c, orderId) => { const r = await c.query("update holds set status='released',closed_at=now() where order_id=$1 and status='held'", [orderId]); return r.rowCount > 0; };
+  // победа покупателя: списать замороженное у продавца и вернуть деньги покупателю (ключи не совпадают с settle:, поэтому проводки проходят)
+  hooks.captureHold = async (c, o) => {
+    const { rows: [h] } = await c.query("select * from holds where order_id=$1 and status='held' for update", [o.id]); if (!h) return null;
+    await c.query("update holds set status='captured',closed_at=now() where id=$1", [h.id]);
+    if (Number(h.amount) > 0) await move(c, o.seller_id, "dispute_capture", -Number(h.amount), "order", o.id, "dcap:" + o.id);
+    const ref = Number(o.total_cents) / 100; await move(c, o.buyer_id, "refund", ref, "order", o.id, "drefund:" + o.id);
+    await c.query("update orders set payment_status='refunded',updated_at=now() where id=$1", [o.id]);
+    await c.query("insert into notifications(user_id,type,payload) values($1,'order_refund',$2)", [o.buyer_id, { order_id: o.id, number: o.number, amount: ref }]).catch(() => {});
+    return { held: Number(h.amount), refunded: ref };
+  };
   app.get("/api/finance", need, wrap(async (req, res) => {
     const type = String(req.query.type || "all"), [w] = await q("select balance from wallets where user_id=$1", [req.user.id]);
     const f = { in: "l.amount>0", out: "l.amount<0 and l.kind<>'withdraw'", withdraw: "l.kind in ('withdraw','withdraw_refund')", all: "true" }[type] || "true";
     const ops = await q(`select l.id,l.kind,l.amount,l.created_at,l.ref_type,l.ref_id,o.number order_number,w.status w_status from ledger_entries l left join orders o on l.ref_type='order' and o.id::text=l.ref_id left join withdrawals w on l.ref_type='withdrawal' and w.id::text=l.ref_id where l.user_id=$1 and ${f} order by l.id desc limit 100`, [req.user.id]);
     const [tt] = await q("select coalesce(sum(amount) filter (where amount>0),0) inn,coalesce(-sum(amount) filter (where amount<0 and kind<>'withdraw'),0) outt from ledger_entries where user_id=$1", [req.user.id]), [pw] = await q("select coalesce(sum(amount),0) s from withdrawals where user_id=$1 and status='pending'", [req.user.id]);
-    res.json({ totals: { in: Number(tt.inn), out: Number(tt.outt), pending: Number(pw.s) }, balance: Number(w?.balance || 0), test_mode: TEST(), ops: ops.map(x => ({ ...x, amount: Number(x.amount) })) });
+    const [fz] = await q("select coalesce(sum(amount),0) s from holds where user_id=$1 and status='held'", [req.user.id]);
+    res.json({ totals: { in: Number(tt.inn), out: Number(tt.outt), pending: Number(pw.s) }, balance: Number(w?.balance || 0), frozen: Number(fz.s), available: Math.max(0, Number(w?.balance || 0) - Number(fz.s)), test_mode: TEST(), ops: ops.map(x => ({ ...x, amount: Number(x.amount) })) });
   }));
   app.post("/api/finance/topup", need, wrap(async (req, res) => {
     if (!TEST()) throw E(403, "test top-up disabled");

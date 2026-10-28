@@ -28,6 +28,7 @@ await pool.query(fs.readFileSync(path.join(dir, "schema_v13.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v14.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v15.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v16.sql"), "utf8"));
+await pool.query(fs.readFileSync(path.join(dir, "schema_v17.sql"), "utf8"));
 
 const app = express(); app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], fontSrc: ["https://fonts.gstatic.com"], scriptSrc: ["'self'", "'unsafe-inline'"], scriptSrcAttr: ["'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:", "https://*.supabase.co"], connectSrc: ["'self'"] } } }));
@@ -67,7 +68,7 @@ app.post("/api/auth/login", lim, wrap(async (req, res) => {
   setCookie(res, u.id); const { password_hash, ...pub } = u; res.json(pub);
 }));
 app.post("/api/auth/logout", (req, res) => { if (req.user) { subs.get(req.user.id)?.forEach(r => r.end()); subs.delete(req.user.id); lastSeen.delete(req.user.id); } res.clearCookie("t").json({ ok: true }); });
-app.get("/api/me", need, wrap(async (req, res) => { const [u] = await q(`select ${U},blocked_until,block_reason,block_hours from users where id=$1`, [req.user.id]); u ? res.json(u) : res.status(401).json({ error: "auth required" }); }));
+app.get("/api/me", need, wrap(async (req, res) => { const [u] = await q(`select ${U},show_badges,blocked_until,block_reason,block_hours from users where id=$1`, [req.user.id]); u ? res.json(u) : res.status(401).json({ error: "auth required" }); }));
 app.patch("/api/me", need, wrap(async (req, res) => {
   const b = req.body || [];
   if (b.is_seller === true) { const [c] = await q("select 1 from seller_codes where user_id=$1 and revoked_at is null", [req.user.id]); if (!c) throw E(403, "sign seller code first"); }
@@ -163,10 +164,10 @@ app.post("/api/orders/:id/dispute", need, wrap(async (req, res) => {
     const { rows: [o] } = await c.query("select * from orders where id=$1 for update", [req.params.id]);
     if (!o || ![o.buyer_id, o.seller_id].includes(req.user.id)) throw E(404, "not found"); if (!["paid", "in_progress", "completed"].includes(o.status)) throw E(409, "dispute not available");
     await c.query("insert into disputes(order_id,opened_by,reason) values($1,$2,$3)", [o.id, req.user.id, reason]);
-    await c.query("update orders set status='dispute',updated_at=now() where id=$1", [o.id]); await ev(c, o.id, "dispute", req.user.id); r2.notifyStaff("Новый спор по заказу " + o.id.slice(0, 8) + ". Откройте админ-панель сайта."); hooks.pushSys?.(await hooks.sysMsg?.(c, o.id, "dispute", req.user.id)); return { ok: true };
+    if (o.status === "completed") await hooks.holdForDispute?.(c, o); await c.query("update orders set status='dispute',updated_at=now() where id=$1", [o.id]); await ev(c, o.id, "dispute", req.user.id); r2.notifyStaff("Новый спор по заказу " + o.id.slice(0, 8) + ". Откройте админ-панель сайта."); hooks.pushSys?.(await hooks.sysMsg?.(c, o.id, "dispute", req.user.id)); return { ok: true };
   }));
 }));
-app.get("/api/sellers/:username/reviews", wrap(async (req, res) => res.json(await q("select r.rating,r.body,r.created_at,r.edited_at,r.reply,r.reply_at,b.username reviewer from reviews r join users s on s.id=r.seller_id join users b on b.id=r.reviewer_id where s.username=$1 order by r.created_at desc limit 50", [req.params.username]))));
+app.get("/api/sellers/:username/reviews", wrap(async (req, res) => res.json(await q("select r.rating,r.body,r.created_at,r.edited_at,r.reply,r.reply_at,b.username reviewer from reviews r join users s on s.id=r.seller_id join users b on b.id=r.reviewer_id where s.username=$1 order by r.created_at desc limit 300", [req.params.username]))));
 app.post("/api/payments/webhook", (_, res) => res.status(501).json({ error: "payment provider not configured" }));
 
 // ---- chat (+ SSE для обновления без перезагрузки)
