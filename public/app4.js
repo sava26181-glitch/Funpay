@@ -200,7 +200,7 @@ async function msgs(cid) {
 
 // ---- вкладка «О пользователе»: ачивки и кодекс
 function aboutExtra(u, cs) {
-  const ach = u.progress ? `<div class="card tpl"><b class="tph">Ачивки</b>${achBlock(u)}</div>` : "";
+  const ach = u.progress ? `<div class="card tpl"><b class="tph">Ачивки</b>${u.is_self && u.show_badges === false ? `<p class="m" style="margin:6px 0 10px">Другие пользователи их не видят. Включить показ можно в настройках.</p>` : ""}${achBlock(u)}</div>` : (u.is_self ? `<div class="card tpl"><b class="tph">Ачивки</b><p class="m" style="margin:6px 0 0">Ачивки скрыты. Включить показ можно в настройках.</p></div>` : "");
   let code = "";
   if (cs && cs.state === "ok") code = `<div class="card tpl"><b class="tph">${ic4("shield", 16)} Кодекс продавца</b><p class="m" style="margin:6px 0 0">Продавец подписал кодекс ${fmtD(cs.signed_at)} и обязуется:</p>${rulesHtml(RULES4)}</div>`;
   else if (cs && cs.state) code = `<div class="card tpl"><b class="tph">${ic4("shield", 16)} Кодекс продавца</b><p style="margin:6px 0 0">${cs.state === "scam" ? "Помечен как скам." : "Нарушил кодекс, он сгорел."} ${esc(cs.reason || "")}</p></div>`;

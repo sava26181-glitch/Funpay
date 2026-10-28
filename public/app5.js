@@ -83,14 +83,24 @@ ${s === "completed" && o.partner_id !== ME.id ? otReview(o, buyer) : ""}
 <div class="otl" id="otl">${otTimeline(o, ms)}</div>
 <div id="achip"></div><div class="otin"><button class="ib2" type="button" onclick="pickAtt('chat')" aria-label="Прикрепить скриншот">${svg(P.clip)}</button><input id="otm" placeholder="Написать..." maxlength="2000" onkeydown="if(event.key==='Enter')otSend()"><button class="btn pri" onclick="otSend()" aria-label="Отправить">›</button></div></div></div>`;
 }
-const otRefresh = async () => {
-  const t = window._ot, box = document.getElementById("otl"); if (!t || !box || document.activeElement?.id === "otm") return;
+const otRefresh = async (force) => {
+  const t = window._ot, box = document.getElementById("otl"); if (!t || !box || (!force && document.activeElement?.id === "otm")) return;
   try { const o = await api("/orders/" + t.id), ms = t.conv ? await api(`/conversations/${t.conv}/messages`) : []; const html = otTimeline(o, ms); if (box.dataset.h === html) return; const atBot = box.scrollHeight - box.scrollTop - box.clientHeight < 60, top = box.scrollTop; box.dataset.h = html; box.innerHTML = html; box.scrollTop = atBot ? 1e9 : top } catch { }
 };
 const otSend = act(async () => {
-  const t = window._ot, i = document.getElementById("otm"), body = i.value.trim(), at = ATT && ATT.id; if ((!body && !at) || window._snd) return; window._snd = 1;
-  try { if (!t.conv) { const c = await api("/conversations", { method: "POST", body: { listingId: t.lot } }); t.conv = c.id; CC = c.id } await api(`/conversations/${t.conv}/messages`, { method: "POST", body: { body, attachmentId: at, listingId: t.lot } }); i.value = ""; clearAtt(); const bx = document.getElementById("otl"); if (bx) bx.dataset.h = ""; await otRefresh(); if (bx) bx.scrollTop = 1e9 } finally { window._snd = 0 }
+  const t = window._ot, i = document.getElementById("otm"); if (!t || !i) return; const body = i.value.trim(), at = ATT && ATT.id; if (!body && !at) return;
+  i.value = ""; if (at) clearAtt(); i.focus();
+  const bx = document.getElementById("otl"), tid = "t" + Date.now() + Math.random().toString(36).slice(2, 5);
+  if (body && bx) { bx.querySelector("p.m:only-child")?.remove(); bx.insertAdjacentHTML("beforeend", bubx({ id: tid, sender_id: ME.id, kind: "text", body, created_at: new Date().toISOString() })); const n = document.getElementById("m" + tid); n && n.classList.add("pend"); bx.dataset.h = ""; bx.scrollTop = 1e9 }
+  window._sq = (window._sq || Promise.resolve()).then(async () => {
+    try {
+      if (!t.conv) { const c = await api("/conversations", { method: "POST", body: { listingId: t.lot } }); t.conv = c.id; CC = c.id }
+      await api(`/conversations/${t.conv}/messages`, { method: "POST", body: { body, attachmentId: at, listingId: t.lot } });
+      await otRefresh(true); const b2 = document.getElementById("otl"); if (b2) b2.scrollTop = 1e9;
+    } catch (e) { document.getElementById("m" + tid)?.remove(); const x = document.getElementById("otm"); if (x && !x.value && body) x.value = body; toast(ruErr(e.message)) }
+  });
 });
+
 
 // ---- дуэли магазинов (24 часа)
 const dRub = c => (c / 100).toLocaleString("ru-RU") + " ₽";

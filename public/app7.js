@@ -59,7 +59,7 @@
     try {
       const r = await fetch("/api/viewing?username=" + encodeURIComponent(name), { credentials: "same-origin" }); if (!r.ok) return; const d = await r.json();
       const l = d.live || d.last; if (!l) { bar.style.display = "none"; return }
-      bar.style.display = ""; bar.innerHTML = `<span class="vwi${d.live ? " on" : ""}"></span><span class="vwt">${d.live ? "Сейчас смотрит" : "Писал по лоту"}</span><a onclick="go('/l/${l.id}')">${E(l.title)}</a>`;
+      bar.style.display = ""; bar.innerHTML = `<span class="vwi${d.live ? " on" : ""}"></span><span class="vwt">${d.live ? "Смотрит" : "Смотрел"}</span><a title="${E(l.title)}" onclick="go('/l/${l.id}')">${E(l.title)}</a>`;
     } catch { }
   }
   function vwMount() {
@@ -85,6 +85,25 @@
     const n = window._rvn; if (!n) throw new Error("Поставьте оценку, нажав на звезду");
     await api(`/orders/${id}/review`, { method: edit ? "PATCH" : "POST", body: { rating: n, body: ($("#rvb").value || "").trim() } }); $("#md")?.remove(); toast(edit ? "Отзыв изменён" : "Спасибо за отзыв"); route();
   });
+
+  // ======================= Отзывы в профиле: сводка, фильтр по звёздам, карточки =======================
+  const MON = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+  const rvDate = iso => { const d = new Date(iso); return d.getDate() + " " + MON[d.getMonth()] + " " + d.getFullYear() };
+  const RVW = ["отзыв", "отзыва", "отзывов"], plr = n => { const a = n % 100, b = n % 10; return a > 10 && a < 20 ? RVW[2] : b === 1 ? RVW[0] : b > 1 && b < 5 ? RVW[1] : RVW[2] };
+  window.reviewsHtml = function (rv, u) {
+    window._rvAll = rv || []; if (window._rvU !== (u && u.username)) { window._rvU = u && u.username; window._rvf = 0 }
+    return `<div id="rvbox">${rvInner()}</div>`;
+  };
+  function rvInner() {
+    const all = window._rvAll || [], f = window._rvf || 0; if (!all.length) return '<div class="card"><p class="m" style="margin:0">Отзывов пока нет.</p></div>';
+    const cnt = [0, 0, 0, 0, 0, 0]; let sum = 0; all.forEach(r => { cnt[r.rating]++; sum += r.rating }); const avg = sum / all.length, mx = Math.max(...cnt.slice(1));
+    const list = (f ? all.filter(r => r.rating === f) : all);
+    const bars = [5, 4, 3, 2, 1].map(n => `<button type="button" class="rvr${f === n ? " on" : ""}" onclick="rvFilter(${n})" ${cnt[n] ? "" : "disabled"} aria-label="Отзывы на ${n} из 5"><span class="rn">${n}</span><svg viewBox="0 0 24 24"><path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.9L12 17.8 5.8 21.1 7 14.2 2 9.3l6.9-1z"/></svg><i><u style="width:${Math.round(cnt[n] / mx * 100)}%"></u></i><b>${cnt[n]}</b></button>`).join("");
+    const chips = `<div class="rvch"><button type="button" class="${f === 0 ? "on" : ""}" onclick="rvFilter(0)">Все <small>${all.length}</small></button>${[5, 4, 3, 2, 1].map(n => `<button type="button" class="${f === n ? "on" : ""}" ${cnt[n] ? "" : "disabled"} onclick="rvFilter(${n})">${n} <svg viewBox="0 0 24 24"><path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.9L12 17.8 5.8 21.1 7 14.2 2 9.3l6.9-1z"/></svg> <small>${cnt[n]}</small></button>`).join("")}</div>`;
+    const cards = list.map(r => `<div class="rvc"><div class="rvh"><span class="rva">${E((r.reviewer || "?").slice(0, 1).toUpperCase())}</span><span class="cb"><b>${E(r.reviewer)}</b><small class="m">${rvDate(r.created_at)}${r.edited_at ? " · изменён" : ""}</small></span>${ratingStars(r.rating)}</div>${r.body ? `<p class="rvt">${E(r.body)}</p>` : '<p class="rvt m">Без комментария</p>'}${r.reply ? `<div class="rrp2"><b>Ответ продавца</b><p>${E(r.reply)}</p></div>` : ""}</div>`).join("");
+    return `<div class="card rvs"><div class="rvbig"><b>${avg.toFixed(1).replace(".", ",")}</b>${ratingStars(avg)}<small class="m">${all.length} ${plr(all.length)}</small></div><div class="rvbars">${bars}</div></div>${chips}${cards || `<div class="card"><p class="m" style="margin:0">Отзывов на ${f} ${f === 1 ? "звезду" : f < 5 ? "звезды" : "звёзд"} нет.</p></div>`}`;
+  }
+  window.rvFilter = n => { window._rvf = (window._rvf === n && n) ? 0 : n; const b = document.getElementById("rvbox"); if (b) b.innerHTML = rvInner() };
 
   // ======================= Админка: счётчики на вкладках и фильтры =======================
   const GROUPS = {
@@ -162,21 +181,34 @@
   let kbMode = "sys", lay = "ru", shift = false, tgt = null, kbEl = null, rep = null;
   try { kbMode = localStorage.getItem("dp_kb") || (matchMedia("(pointer:coarse)").matches ? "own" : "sys") } catch { kbMode = matchMedia("(pointer:coarse)").matches ? "own" : "sys" }
   const MANAGED = el => el && (el.id === "lt" || el.id === "otm");
+  // платформа: от неё зависит вид и поведение клавиатуры
+  const PLAT = (() => { const ua = navigator.userAgent || ""; if (/Android/i.test(ua)) return "and"; if (/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)) return "ios"; return "pc" })();
+  window.kbPlat = PLAT;
+  let caps = false, lastShift = 0;
+  const SHI = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"><path d="M12 4l8 9h-5v6H9v-6H4z"/></svg>';
+  const BKI = '<svg width="22" height="16" viewBox="0 0 24 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M8 1h13a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8L1 9z"/><path d="M13 6l6 6M19 6l-6 6"/></svg>';
+  const SNI = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
+  function autoShift() { const t = tgt || document.getElementById("lt") || document.getElementById("otm"); if (!t || lay === "sym" || caps) return; const pre = t.value.slice(0, t.selectionStart ?? t.value.length); shift = pre.trim() === "" || /[.!?]\s+$/.test(pre) || /\n$/.test(pre) }
   function kbRender() {
-    if (!kbEl) return;
-    const rows = KB[lay].map(r => `<div class="kr">${r.map(k => `<button type="button" class="k ${k === "⇧" ? "kf" + (shift ? " on" : "") : k === "⌫" ? "kf" : ""}" data-k="${k}">${k === "⌫" ? '<svg width="22" height="16" viewBox="0 0 24 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M8 1h13a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H8L1 9z"/><path d="M13 6l6 6M19 6l-6 6"/></svg>' : k === "⇧" ? "⇧" : (shift && lay !== "sym" ? k.toUpperCase() : k)}</button>`).join("")}</div>`).join("");
-    kbEl.querySelector(".kbody").innerHTML = rows + `<div class="kr"><button type="button" class="k kf kw" data-k="__sym">${lay === "sym" ? "АБВ" : "?123"}</button><button type="button" class="k kf" data-k="__lang">${lay === "ru" ? "RU" : lay === "en" ? "EN" : lay.toUpperCase()}</button><button type="button" class="k ksp" data-k=" ">Пробел</button><button type="button" class="k" data-k=".">.</button><button type="button" class="k" data-k=",">,</button><button type="button" class="k kf ksend" data-k="__send" aria-label="Отправить"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div>`;
+    if (!kbEl) return; kbEl.classList.remove("dkb-ios", "dkb-and", "dkb-pc"); kbEl.classList.add("dkb-" + PLAT);
+    const up = (shift || caps) && lay !== "sym";
+    const rows = KB[lay].map(r => `<div class="kr">${r.map(k => k === "⇧" ? `<button type="button" class="k kf ks${shift || caps ? " on" : ""}${caps ? " caps" : ""}" data-k="⇧" aria-label="Заглавные">${SHI}</button>` : k === "⌫" ? `<button type="button" class="k kf" data-k="⌫" aria-label="Стереть">${BKI}</button>` : `<button type="button" class="k" data-k="${k}">${up ? k.toUpperCase() : k}</button>`).join("")}</div>`).join("");
+    const lg = lay === "ru" ? "RU" : lay === "en" ? "EN" : "RU";
+    const bottom = PLAT === "ios"
+      ? `<button type="button" class="k kf kw" data-k="__sym">${lay === "sym" ? "АБВ" : "123"}</button><button type="button" class="k kf" data-k="__lang">${lg}</button><button type="button" class="k ksp" data-k=" ">пробел</button><button type="button" class="k kf kw ksend" data-k="__send">Отпр.</button>`
+      : `<button type="button" class="k kf kw" data-k="__sym">${lay === "sym" ? "АБВ" : "?123"}</button><button type="button" class="k" data-k=",">,</button><button type="button" class="k kf" data-k="__lang">${lg}</button><button type="button" class="k ksp" data-k=" ">${lay === "ru" ? "Русский" : lay === "en" ? "English" : "Пробел"}</button><button type="button" class="k" data-k=".">.</button><button type="button" class="k kf ksend" data-k="__send" aria-label="Отправить">${SNI}</button>`;
+    kbEl.querySelector(".kbody").innerHTML = rows + `<div class="kr kbot">${bottom}</div>`;
   }
   function kbMount() {
     if (kbEl) return;
     kbEl = document.createElement("div"); kbEl.id = "dkb";
     kbEl.innerHTML = `<div class="ktop"><span>Клавиатура DonutPay</span><span><button type="button" class="kt" data-k="__sys">Системная</button><button type="button" class="kt" data-k="__hide" aria-label="Скрыть">Скрыть</button></span></div><div class="kbody"></div>`;
     document.body.append(kbEl); kbRender();
-    kbEl.addEventListener("pointerdown", e => { const b = e.target.closest("button"); if (!b) return; e.preventDefault(); press(b.dataset.k); if (b.dataset.k === "⌫") { clearTimeout(rep); rep = setTimeout(function loop() { press("⌫"); rep = setTimeout(loop, 55) }, 380) } });
+    kbEl.addEventListener("pointerdown", e => { const b = e.target.closest("button"); if (!b) return; e.preventDefault(); if (PLAT === "and" && navigator.vibrate) { try { navigator.vibrate(6) } catch { } } if (PLAT === "ios" && !b.classList.contains("kf") && !b.classList.contains("ksp")) { b.classList.add("pv"); setTimeout(() => b.classList.remove("pv"), 140) } press(b.dataset.k); if (b.dataset.k === "⌫") { clearTimeout(rep); rep = setTimeout(function loop() { press("⌫"); rep = setTimeout(loop, 55) }, 380) } });
     const stop = () => { clearTimeout(rep) }; document.addEventListener("pointerup", stop); document.addEventListener("pointercancel", stop);
     kbEl.addEventListener("contextmenu", e => e.preventDefault());
   }
-  function kbShow() { if (kbMode !== "own") return; kbMount(); kbEl.classList.add("on"); document.body.classList.add("ckb"); const h = kbEl.offsetHeight; document.documentElement.style.setProperty("--ckh", h + "px"); window.dispatchEvent(new Event("resize")); const m = document.getElementById("chm") || document.getElementById("otl"); if (m) m.scrollTop = 1e9; if (tgt && tgt.id === "otm") setTimeout(() => tgt.scrollIntoView({ block: "center" }), 50) }
+  function kbShow() { if (kbMode !== "own") return; kbMount(); autoShift(); kbRender(); kbEl.classList.add("on"); document.body.classList.add("ckb"); const h = kbEl.offsetHeight; document.documentElement.style.setProperty("--ckh", h + "px"); window.dispatchEvent(new Event("resize")); const m = document.getElementById("chm") || document.getElementById("otl"); if (m) m.scrollTop = 1e9; if (tgt && tgt.id === "otm") setTimeout(() => tgt.scrollIntoView({ block: "center" }), 50) }
   function kbHide() { kbEl && kbEl.classList.remove("on"); document.body.classList.remove("ckb"); document.documentElement.style.setProperty("--ckh", "0px"); window.dispatchEvent(new Event("resize")) }
   function put(ch) {
     const t = tgt || document.getElementById("lt") || document.getElementById("otm"); if (!t) return; const s = t.selectionStart ?? t.value.length, e = t.selectionEnd ?? s;
@@ -185,19 +217,35 @@
     t.dispatchEvent(new Event("input", { bubbles: true }));
   }
   function press(k) {
-    if (k === "⇧") { shift = !shift; return kbRender() }
-    if (k === "⌫") return put("\b");
-    if (k === "__sym") { lay = lay === "sym" ? "ru" : "sym"; shift = false; return kbRender() }
-    if (k === "__lang") { lay = lay === "ru" ? "en" : "ru"; shift = false; return kbRender() }
+    if (k === "⇧") { const n = Date.now(); if (caps) { caps = false; shift = false } else if (shift && n - lastShift < 450) caps = true; else shift = !shift; lastShift = n; return kbRender() }
+    if (k === "⌫") { put("\b"); const w = shift; autoShift(); if (w !== shift) kbRender(); return }
+    if (k === "__sym") { lay = lay === "sym" ? "ru" : "sym"; shift = false; if (lay !== "sym") autoShift(); return kbRender() }
+    if (k === "__lang") { lay = lay === "ru" ? "en" : "ru"; shift = false; autoShift(); return kbRender() }
     if (k === "__hide") { document.activeElement && document.activeElement.blur && document.activeElement.blur(); return kbHide() }
     if (k === "__sys") { kbMode = "sys"; try { localStorage.setItem("dp_kb", "sys") } catch { } kbHide(); $$("#lt,#otm").forEach(i => i.removeAttribute("inputmode")); const t = tgt; if (t) { t.blur(); setTimeout(() => t.focus(), 60) } return }
     if (k === "__send") { const f = tgt && tgt.id === "otm" ? (typeof otSend === "function" ? otSend : null) : (typeof sendC === "function" ? sendC : null); if (f) f(); return }
-    const up = shift && lay !== "sym"; put(up ? k.toUpperCase() : k); if (up && !window._caps) { shift = false; kbRender() }
+    const up = (shift || caps) && lay !== "sym"; put(up ? k.toUpperCase() : k); if (lay === "sym") return; if (!caps) { const was = shift; autoShift(); if (was || shift) kbRender() } else kbRender()
   }
   function kbAttach() { $$("#lt,#otm").forEach(i => { if (kbMode === "own") { i.setAttribute("inputmode", "none"); i.setAttribute("autocomplete", "off") } else i.removeAttribute("inputmode") }) }
   document.addEventListener("focusin", e => { if (!MANAGED(e.target)) return; tgt = e.target; if (kbMode === "own") { e.target.setAttribute("inputmode", "none"); kbShow() } });
   document.addEventListener("pointerdown", e => { if (kbMode !== "own" || !kbEl || !kbEl.classList.contains("on")) return; if (e.target.closest("#dkb,.cmp,.otin,.ib2,.btn,a,button,input,textarea,select,label")) return; if (e.target.closest("#chm,#otl,.chm,.otl")) { document.activeElement && document.activeElement.blur && document.activeElement.blur(); kbHide() } }, true);
   window.kbSwitchOwn = function () { kbMode = "own"; try { localStorage.setItem("dp_kb", "own") } catch { } kbAttach() };
+
+  // ======================= Настройки: клавиатура и ачивки =======================
+  const PN = { and: "Android", ios: "iPhone / iPad (iOS)", pc: "компьютер" };
+  window.kbSet = function (m) {
+    kbMode = m; try { localStorage.setItem("dp_kb", m) } catch { }
+    if (m === "own") kbAttach(); else { kbHide(); $$("#lt,#otm").forEach(i => i.removeAttribute("inputmode")) }
+    const c = document.getElementById("kbs"); if (c) c.outerHTML = kbCard(); toast(m === "own" ? "Включена клавиатура DonutPay" : "Включена системная клавиатура");
+  };
+  const kbCard = () => `<div class="card" id="kbs" style="margin-top:12px"><b>Клавиатура в чате</b><p class="m" style="margin:4px 0 10px">Определено устройство: <b>${PN[PLAT]}</b>. ${PLAT === "ios" ? "Клавиатура DonutPay повторяет раскладку iOS: заглавная после точки, двойное нажатие на стрелку включает Caps Lock." : PLAT === "and" ? "Клавиатура DonutPay повторяет раскладку Android: запятая и точка рядом с пробелом, вибрация при нажатии, круглая кнопка отправки." : "На компьютере удобнее системная клавиатура, но встроенную тоже можно включить."}</p>
+<div class="kbopt"><button type="button" class="${kbMode === "own" ? "on" : ""}" onclick="kbSet('own')"><b>Клавиатура DonutPay</b><small>Встроенная, не закрывает чат и кнопки</small></button><button type="button" class="${kbMode !== "own" ? "on" : ""}" onclick="kbSet('sys')"><b>Системная</b><small>Клавиатура телефона или браузера</small></button></div>
+<p class="m" style="margin:8px 0 0;font-size:12px">Применяется сразу, сохранять не нужно. Если встроенная клавиатура вам неудобна, переключитесь на системную.</p></div>`;
+  window.bdSet = async function (on) {
+    try { await api("/me/badges", { method: "PATCH", body: { show: on } }); if (ME) ME.show_badges = on; const c = document.getElementById("bds"); if (c) c.outerHTML = bdCard(); toast(on ? "Ачивки показаны в профиле" : "Ачивки скрыты") } catch (e) { toast(e.message || "Не удалось сохранить") }
+  };
+  const bdCard = () => `<div class="card" id="bds" style="margin-top:12px"><b>Ачивки в профиле</b><p class="m" style="margin:4px 0 10px">Ачивки показываются только на вашей странице профиля, в лотах их нет. Можно скрыть.</p><div class="kbopt"><button type="button" class="${ME && ME.show_badges !== false ? "on" : ""}" onclick="bdSet(true)"><b>Показывать</b><small>Видны всем в профиле</small></button><button type="button" class="${ME && ME.show_badges === false ? "on" : ""}" onclick="bdSet(false)"><b>Скрыть</b><small>Видите только вы</small></button></div></div>`;
+  function setCards() { const st = document.getElementById("stc"); if (!st || document.getElementById("kbs")) return; st.insertAdjacentHTML("afterend", kbCard() + (ME ? bdCard() : "")) }
 
   // ======================= Хуки маршрутов =======================
   const ar = window.afterRoute;
@@ -206,6 +254,7 @@
     safe(() => {
       const seg = (path || location.hash.slice(1) || "/").split("/").filter(Boolean)[0] || "home"; document.body.dataset.pg = seg;
       if (typeof ME !== "undefined" && ME && !window._lk0) { window._lk0 = 1; lockCheck() }
+      if (/^\/settings/.test(path || "")) setTimeout(setCards, 30);
       kbAttach(); if (!document.querySelector("#lt,#otm")) kbHide(); seenFill(); vwMount(); admDecorate(); setTimeout(admDecorate, 300);
       setTimeout(groupLots, 80); setTimeout(groupLots, 500);
       if (/^\/l\//.test(path || "")) { const id = (path || "").split("/")[2]; vwSend(id); clearInterval(window._vwh); window._vwh = setInterval(() => { if (!/^#\/l\//.test(location.hash)) return clearInterval(window._vwh); vwSent = null; vwSend(id) }, 30000) } else if (vwSent) vwSend(null);
@@ -214,5 +263,6 @@
   };
   const CLIP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21.4 11.1l-8.6 8.6a5.2 5.2 0 0 1-7.4-7.4l8.6-8.6a3.5 3.5 0 0 1 5 5l-8.7 8.6a1.8 1.8 0 0 1-2.5-2.5l7.9-7.9"/></svg>';
   function clipFix() { $$('.ib2[aria-label="Вложение"],.ib2[aria-label="Прикрепить скриншот"]').forEach(b => { if (b.dataset.cl) return; b.dataset.cl = 1; b.classList.add("clipb"); b.innerHTML = CLIP }) }
-  new MutationObserver(() => { safe(kbAttach)(); safe(clipFix)() }).observe(document.body, { childList: true, subtree: true });
+  function stripFire() { if (!/^(games|catalog|l|home)?$/.test(document.body.dataset.pg || "")) return; const root = document.getElementById("app"); if (!root) return; const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode())) if (n.nodeValue.indexOf("\u{1F525}") >= 0) n.nodeValue = n.nodeValue.replace(/\s*\u{1F525}\s*/gu, " ").trim() }
+  new MutationObserver(() => { safe(kbAttach)(); safe(clipFix)(); safe(stripFire)() }).observe(document.body, { childList: true, subtree: true });
 })();
