@@ -68,8 +68,8 @@
   }
 
   // ======================= Звёзды: компонент и форма отзыва =======================
-  window.ratingStars = function (v, n) {
-    v = +v || 0; return `<span class="rs5" title="${v}">${[0, 1, 2, 3, 4].map(i => `<i style="--f:${Math.round(Math.max(0, Math.min(1, v - i)) * 100)}%"></i>`).join("")}<b>${v.toFixed(1).replace(/\.0$/, "")}</b>${n != null ? `<small class="m">${n} отз.</small>` : ""}</span>`;
+  window.ratingStars = function (v, n, compact) {
+    v = +v || 0; return `<span class="rs5" title="${v}">${[0, 1, 2, 3, 4].map(i => `<i style="--f:${Math.round(Math.max(0, Math.min(1, v - i)) * 100)}%"></i>`).join("")}${compact ? "" : `<b>${v.toFixed(1).replace(/\.0$/, "")}</b>`}${n != null ? `<small class="m">${compact ? n : n + " отз."}</small>` : ""}</span>`;
   };
   const RLBL = ["", "Ужасно", "Плохо", "Нормально", "Хорошо", "Отлично"];
   window.revStar = n => { window._rvn = n; $$("#rvst button").forEach((b, i) => b.classList.toggle("on", i < n)); const l = document.getElementById("rvl"); if (l) l.textContent = RLBL[n] || "Выберите оценку" };

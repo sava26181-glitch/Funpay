@@ -154,3 +154,11 @@ header{-webkit-backdrop-filter:blur(10px)}
 /* iOS Safari увеличивает страницу, если шрифт поля меньше 16px */
 @supports (-webkit-touch-callout:none){input,textarea,select{font-size:16px!important}}
 @media(pointer:coarse){input,textarea,select{font-size:max(16px,1em)}}
+/* ===== v19: звёзды продавца и пакеты доната ===== */
+/* в профиле и в «Моих объявлениях» звёзды продавца не нужны: это его же лоты */
+body[data-pg="u"] .rw .sl,body[data-pg="shop"] .rw .sl,body[data-pg="my"] .rw .sl{display:none}
+.rw .sl .cb{display:flex;flex-direction:column;gap:1px;min-width:0}
+.rw .sl .rsr .rs5{gap:1px}.rw .sl .rsr .rs5 i{width:13px;height:13px}.rw .sl .rsr .rs5 small{margin-left:5px;font-weight:700}
+.rw .sl .rsn{font-size:12px}
+.qtyb{margin:2px 0 10px}.qtyh{font-weight:800;font-size:13px;color:var(--m);text-transform:uppercase;letter-spacing:.04em;margin:0 0 6px}
+.qtyc a{font-variant-numeric:tabular-nums}
