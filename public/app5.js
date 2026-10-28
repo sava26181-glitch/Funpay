@@ -48,22 +48,23 @@ function otReview(o, buyer) {
   return `<div class="card orv"><div class="row bet"><b>${buyer ? "Ваш отзыв" : "Отзыв покупателя"}</b><small class="m">${dt(r.created_at)}${r.edited_at ? ", изменён" : ""}</small></div><div style="margin:8px 0 4px;font-size:22px">${stars5(r.rating)}</div>${r.body ? `<p style="margin:0;overflow-wrap:anywhere">${esc(r.body).replace(/\n/g, "<br>")}</p>` : ""}${buyer ? `<div class="row" style="gap:8px;margin-top:12px"><button class="btn sm" onclick="revForm('${o.id}',1)">Изменить</button><button class="btn sm dng" onclick="revDel('${o.id}')">Удалить</button></div>` : ""}${rep}</div>`;
 }
 const RSEL = [[5, "5 — отлично"], [4, "4 — хорошо"], [3, "3 — нормально"], [2, "2 — плохо"], [1, "1 — ужасно"]];
-const revForm = (id, edit) => { const r = edit ? window._rv : null; formM(edit ? "Изменить отзыв" : "Оставить отзыв", [{ k: "r", l: "Оценка", t: "select", o: RSEL, v: r ? r.rating : 5 }, { k: "b", l: "Комментарий (необязательно)", t: "area", max: 1000, v: r ? r.body || "" : "" }], edit ? "Сохранить" : "Отправить", async v => { await api(`/orders/${id}/review`, { method: edit ? "PATCH" : "POST", body: { rating: +v.r, body: v.b.trim() } }); toast(edit ? "Отзыв изменён" : "Отзыв сохранён"); route() }) };
+const revForm_old = (id, edit) => { const r = edit ? window._rv : null; formM(edit ? "Изменить отзыв" : "Оставить отзыв", [{ k: "r", l: "Оценка", t: "select", o: RSEL, v: r ? r.rating : 5 }, { k: "b", l: "Комментарий (необязательно)", t: "area", max: 1000, v: r ? r.body || "" : "" }], edit ? "Сохранить" : "Отправить", async v => { await api(`/orders/${id}/review`, { method: edit ? "PATCH" : "POST", body: { rating: +v.r, body: v.b.trim() } }); toast(edit ? "Отзыв изменён" : "Отзыв сохранён"); route() }) };
 const revDel = id => ask("Удалить отзыв? Продавец получит уведомление.", "Удалить", act(async () => { await api(`/orders/${id}/review`, { method: "DELETE" }); toast("Отзыв удалён"); route() }));
 const rplForm = id => formM("Ответ на отзыв", [{ k: "b", l: "Ваш ответ покупателю", t: "area", max: 1000, v: window._rv && window._rv.reply || "" }], "Отправить", async v => { if (v.b.trim().length < 2) throw new Error("Напишите ответ"); await api(`/orders/${id}/review/reply`, { method: "POST", body: { body: v.b.trim() } }); toast("Ответ опубликован"); route() });
 const rplDel = id => ask("Удалить ответ на отзыв?", "Удалить", act(async () => { await api(`/orders/${id}/review/reply`, { method: "DELETE" }); toast("Ответ удалён"); route() }));
 async function orderPage(id) {
   need(); const o = await api("/orders/" + id), buyer = o.buyer_id === ME.id || o.partner_id === ME.id, s = o.status;
-  const ms = o.conversation_id ? await api(`/conversations/${o.conversation_id}/messages`) : [];
+  const ms = o.conversation_id && o.partner_id !== ME.id ? await api(`/conversations/${o.conversation_id}/messages`).catch(() => []) : [];
   const closed = ["completed", "cancelled"].includes(s) ? o.events.filter(e => e.status === s).pop() : null, opened = o.events[0] || { created_at: o.created_at };
   const other = buyer ? o.seller_name : o.buyer_name, otherOn = buyer ? o.seller_online : o.buyer_online, am = buyer ? o.seller_avatar_media : o.buyer_avatar_media, ap = buyer ? o.seller_avatar_preset : o.buyer_avatar_preset;
   const attrs = Object.entries(o.attrs || {}).filter(([k, v]) => v);
   const fld = (l, v) => v ? `<div class="otf"><small>${l}</small><div>${v}</div></div>` : "";
   const acts = [
     s === "pending_payment" && buyer && !o.partner_id ? `<button class="btn pri" onclick="payConfirm('${o.id}')">Оплатить ${rub(o.total_cents)}</button>` : "",
-    s === "pending_payment" && !o.partner_id ? `<button class="btn dng" onclick="ost('${o.id}','cancelled')">Отменить заказ</button>` : "",
+    s === "pending_payment" ? `<button class="btn dng" onclick="ost('${o.id}','cancelled')">Отменить заказ</button>` : "",
+    ["paid", "in_progress"].includes(s) && o.seller_id === ME.id ? `<button class="btn dng" onclick="ostCancelPaid('${o.id}')">Отменить и вернуть деньги покупателю</button>` : "",
     s === "paid" && !buyer ? `<button class="btn pri" onclick="ost('${o.id}','in_progress')">Приступить к выполнению</button>` : "",
-    ["paid", "in_progress"].includes(s) && buyer ? `<button class="btn pri" onclick="ost('${o.id}','completed')">Подтвердить выполнение заказа</button>` : "",
+    ["paid", "in_progress", "dispute"].includes(s) && o.buyer_id === ME.id ? `<button class="btn pri" onclick="ost('${o.id}','completed')">Подтвердить выполнение заказа${s === "dispute" ? " и закрыть спор" : ""}</button>` : "",
     ["paid", "in_progress", "completed"].includes(s) && o.partner_id !== ME.id ? `<button class="btn dng" onclick="disp('${o.id}')">Открыть спор</button>` : "",
   ].filter(Boolean);
   window._ot = { id: o.id, conv: o.conversation_id, lot: o.listing_id, buyer: o.buyer_id, seller: o.seller_id };
@@ -75,15 +76,15 @@ ${s === "pending_payment" ? `<p class="m">Заказ ещё не оплачен.
 <div class="otg">${fld("Игра", esc(o.game_name))}${fld("Категория", `<a class="lk" onclick="go('/catalog?game=${o.game}&category=${o.category}')">${esc(o.category_name)}</a>`)}${attrs.map(([k, v]) => fld(esc(k), esc(v))).join("")}</div>
 ${fld("Краткое описание", esc(o.title) + (o.quantity > 1 ? " × " + o.quantity : ""))}${fld("Подробное описание", esc(o.summary || o.details || "").replace(/\n/g, "<br>"))}
 <div class="otg">${fld("Открыт", `${odt(opened.created_at)}<br><span class="m">(${ago5(opened.created_at)})</span>`)}${closed ? fld("Закрыт", `${odt(closed.created_at)}<br><span class="m">(${ago5(closed.created_at)})</span>`) : ""}</div>
-<div class="otf"><small>Сумма</small><div class="osum">${rub(o.total_cents)}</div></div>
+<div class="otf"><small>Сумма</small><div class="osum">${rub(buyer ? o.total_cents : Number(o.total_cents) + Number(o.discount_cents || 0))}</div>${!buyer && o.discount_cents > 0 ? `<small class="m">Покупатель применил промокод: скидку ${rub(o.discount_cents)} оплачивает площадка, вы получаете полную сумму за вычетом комиссии.</small>` : ""}</div>
 ${acts.length ? `<div class="oacts">${acts.join("")}</div>` : ""}
 ${s === "completed" && o.partner_id !== ME.id ? otReview(o, buyer) : ""}
-<div class="card otc"><div class="oth">${avs(other || "?", am, otherOn, ap)}<div style="flex:1;min-width:0"><b><a onclick="go('/u/'+encodeURIComponent('${esc(other || "")}'))">${esc(other || "")}</a></b><div class="m">${otherOn ? "Онлайн" : "Был(а) недавно"}</div></div>${o.conversation_id ? `<button class="btn sm" onclick="go('/chat/${o.conversation_id}')">Весь чат</button>` : ""}</div>
+<div class="card otc"><div class="oth">${avs(other || "?", am, otherOn, ap)}<div style="flex:1;min-width:0"><b><a onclick="go('/u/'+encodeURIComponent('${esc(other || "")}'))">${esc(other || "")}</a></b><div class="m"><span data-seen="${esc(other || "")}">${otherOn ? "Онлайн" : seenLabel(other)}</span></div></div>${o.conversation_id ? `<button class="btn sm" onclick="go('/chat/${o.conversation_id}')">Весь чат</button>` : ""}</div>
 <div class="otl" id="otl">${otTimeline(o, ms)}</div>
 <div id="achip"></div><div class="otin"><button class="ib2" type="button" onclick="pickAtt('chat')" aria-label="Прикрепить скриншот">${svg(P.clip)}</button><input id="otm" placeholder="Написать..." maxlength="2000" onkeydown="if(event.key==='Enter')otSend()"><button class="btn pri" onclick="otSend()" aria-label="Отправить">›</button></div></div></div>`;
 }
 const otRefresh = async () => {
-  const t = window._ot, box = document.getElementById("otl"); if (!t || !box || document.activeElement?.id === "otm" && document.getElementById("otm").value) return;
+  const t = window._ot, box = document.getElementById("otl"); if (!t || !box || document.activeElement?.id === "otm") return;
   try { const o = await api("/orders/" + t.id), ms = t.conv ? await api(`/conversations/${t.conv}/messages`) : []; const html = otTimeline(o, ms); if (box.dataset.h === html) return; const atBot = box.scrollHeight - box.scrollTop - box.clientHeight < 60, top = box.scrollTop; box.dataset.h = html; box.innerHTML = html; box.scrollTop = atBot ? 1e9 : top } catch { }
 };
 const otSend = act(async () => {
@@ -139,7 +140,7 @@ function duelBody(d) {
   return `${head}${mineD ? `<h3>Ваша дуэль</h3>${duelCard(mineD, true)}` : ""}<h3>Участие</h3><div class="card">${part}</div><h3>Идут сейчас</h3>${others.map(x => duelCard(x)).join("") || empty("Сейчас нет других дуэлей. Дуэль начинается, когда в одной игре и категории нашлись два подходящих по силе магазина.")}<h3>Недавние итоги</h3>${d.done.map(x => `<div class="card row bet"><span style="display:flex;gap:8px;align-items:center;min-width:0">${x.winner_id ? ic4("trophy", 18) : ""}<span style="overflow-wrap:anywhere"><b>${x.winner_id ? esc(x.winner_id === x.seller_a ? x.name_a : x.name_b) : "Ничья"}</b><br><small class="m">${esc(x.name_a)} ${x.score_a} : ${x.score_b} ${esc(x.name_b)}</small></span></span><small class="m" style="text-align:right">${esc(x.game_name || "")} · ${esc(x.category_name)}${x.bonus_cents ? "<br>бонус " + dRub(x.bonus_cents) : ""}</small></div>`).join("") || empty("Завершённых дуэлей пока нет.")}`;
 }
 battlesPage = async function () {
-  const d = await api("/duels"), fe = await api("/fees").catch(() => ({})); d.rules.sale_fee = fe.sale_pct ?? 15; d.rules.withdraw_fee = fe.withdraw_pct ?? 3; clearInterval(window._dp);
+  const d = await api("/duels"), fe = await api("/fees").catch(() => ({})); d.rules.sale_fee = fe.sale_pct ?? 7.5; d.rules.withdraw_fee = fe.withdraw_pct ?? 3; clearInterval(window._dp);
   window._dp = setInterval(async () => { if (!/^#\/battles/.test(location.hash)) return clearInterval(window._dp);  try { const n = await api("/duels"); const el = document.getElementById("duels"); if (el) el.innerHTML = duelBody(n) } catch { } }, 8000);
   return `<h2 class="h2i">${ic4("swords", 20)}Дуэли магазинов</h2><p class="m" style="margin-top:0">Два магазина одной категории соревнуются 24 часа. Побеждает тот, кто лучше обслужил покупателей. Победитель получает деньги на баланс и поднятие в каталоге.</p>${duelHow(d.rules)}<div id="duels">${duelBody(d)}</div>`;
 };
@@ -150,7 +151,7 @@ const duelAutoOff = act(async (g, c) => { await api("/duels/auto", { method: "PO
 
 // ---- тестовые комиссии: расчёт в форме лота, вывод, заявки
 let FEES = null;
-const feesGet = async () => FEES || (FEES = await api("/fees").catch(() => ({ sale_pct: 15, my_sale_pct: 15, withdraw_pct: 3 })));
+const feesGet = async () => FEES || (FEES = await api("/fees").catch(() => ({ sale_pct: 7.5, my_sale_pct: 7.5, withdraw_pct: 3 })));
 const mny = n => (Math.round(n * 100) / 100).toLocaleString("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₽";
 async function feeBox() {
   const p = document.getElementById("sp"); if (!p) return; const f = await feesGet();
@@ -172,7 +173,7 @@ const wdM = m => { window._wdm = m; document.querySelectorAll(".wdm button").for
 const wdCalc = () => { const a = +document.getElementById("wda")?.value || 0, fee = Math.round(a * window._wdp) / 100; const e = document.getElementById("wdc"); if (e) e.innerHTML = `<div class="sfr"><span>Спишется с баланса</span><b>${mny(a)}</b></div><div class="sfr"><span>Комиссия ${window._wdp}%</span><b>−${mny(fee)}</b></div><div class="sfr tt"><span>Вы получите</span><b>${mny(a - fee)}</b></div>` };
 wdAdmin = async function () {
   const ws = await api("/admin/withdrawals");
-  return ws.map(w => `<div class="card"><div class="row bet"><b>${esc(w.username)} · ${fm(w.amount)}</b><span class="tag">${{ pending: "Ожидает", paid: "Выплачено", rejected: "Отклонено" }[w.status]}</span></div><div class="m">К выплате: <b>${fm(w.amount - (w.fee || 0))}</b> (комиссия ${fm(w.fee || 0)})</div><div class="m">${{ card: "Карта", sbp: "СБП", crypto: "Крипта", other: "Другое" }[w.method]}: ${esc(w.details)}</div><small class="m">${fmtD(w.created_at)}</small>${w.status === "pending" ? `<div class="row" style="margin-top:8px"><button class="btn sm pri" onclick="wdAct('${w.id}','paid')">Выплачено</button><button class="btn sm dng" onclick="wdAct('${w.id}','reject')">Отклонить и вернуть</button></div>` : ""}</div>`).join("") || empty("Заявок на вывод нет.");
+  return ws.map(w => `<div class="card"><div class="row bet"><b>${esc(w.username)} · ${fm(w.amount)}</b><span class="tag">${{ pending: "Ожидает", processing: "В обработке", paid: "Выплачено", rejected: "Отклонено" }[w.status]}</span></div><div class="m">К выплате: <b>${fm(w.amount - (w.fee || 0))}</b> (комиссия ${fm(w.fee || 0)})</div><div class="m">${{ card: "Карта", sbp: "СБП", crypto: "Крипта", other: "Другое" }[w.method]}: ${esc(w.details)}</div><small class="m">${fmtD(w.created_at)}</small>${["pending", "processing"].includes(w.status) ? `<div class="row" style="margin-top:8px">${w.status === "pending" ? `<button class="btn sm" onclick="wdAct('${w.id}','processing')">Взять в работу</button>` : ""}<button class="btn sm pri" onclick="wdAct('${w.id}','paid')">Выплачено</button><button class="btn sm dng" onclick="wdAct('${w.id}','reject')">Отклонить и вернуть</button></div>` : ""}</div>`).join("") || empty("Заявок на вывод нет.");
 };
 
 // ---- промокоды (владелец)
@@ -215,3 +216,5 @@ loadHist = async function (el) {
     el.innerHTML = `<div class="card phc"><div class="phtop"><div><small class="m">Сейчас</small><div class="phn">${rubc(cur)}</div></div>${h.length > 1 ? `<span class="phb ${diff < 0 ? "pdn" : diff > 0 ? "pup" : ""}">${diff < 0 ? "▼" : diff > 0 ? "▲" : "•"} ${Math.abs(pc)}% с ${new Date(h[0].created_at).toLocaleDateString("ru-RU", { day: "numeric", month: "short" })}</span>` : ""}</div>${h.length > 1 ? chart2(h) : `<div class="phflat"><svg viewBox="0 0 120 24" preserveAspectRatio="none"><path d="M0 12H120" /></svg><span><i></i>Цена стабильна с ${new Date(h[0].created_at).toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}</span></div>`}${h.length > 1 ? `<div class="phs"><div><small>Минимум</small><b>${rubc(Math.min(...ys))}</b></div><div><small>Максимум</small><b>${rubc(Math.max(...ys))}</b></div><div><small>Изменений</small><b>${h.length - 1}</b></div></div>` : ""}${ch.length ? `<div class="phl"><small class="m">Последние изменения</small>${ch.join("")}</div>` : ""}${wui ? `<div class="phwr">${wui}</div>` : ""}</div>`;
   } catch (e) { el.innerHTML = `<p class="m">История цены недоступна: ${esc(e.message)}</p>` }
 };
+
+const ostCancelPaid = id => ask("Отменить заказ? Деньги будут возвращены покупателю.", "Отменить заказ", act(async () => { await api(`/orders/${id}/status`, { method: "POST", body: { status: "cancelled" } }); toast("Заказ отменён, деньги возвращены покупателю"); route() }));

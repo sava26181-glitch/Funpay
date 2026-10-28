@@ -164,7 +164,13 @@ function achBtn(u) { const p = u.progress; if (!p) return ""; window._achU = u; 
 function achOpen() { mdl(`<h3 style="margin-top:0">Ачивки</h3>${achBlock(window._achU)}`) }
 
 // ---- номер заказа в системном сообщении кликабелен: ведёт на настоящую страницу заказа (защита от подделок в чате)
-function ordLink(h, oid) { return oid ? h.replace(/#[0-9A-F]{6,12}/g, x => `<a class="onum" onclick="go('/order/${oid}')">${x}</a>`) : h }
+function ordLink(h, oid) { return h.replace(/#([0-9A-Fa-f]{6,12})/g, (x, n) => `<a class="onum" onclick="event.stopPropagation();goOrd('${oid || ""}','${n}')">${x}</a>`) }
+function goOrd(oid, n) {
+  const staff = typeof isStaff === "function" && isStaff();
+  const adm = () => go("/admin?tab=orders&q=" + encodeURIComponent(n));
+  const byNum = () => api("/orders/by-number/" + encodeURIComponent(n)).then(r => go("/order/" + r.id)).catch(e => staff ? adm() : toast("Заказ не найден"));
+  if (oid) api("/orders/" + oid).then(() => go("/order/" + oid)).catch(() => staff ? adm() : byNum()); else byNum();
+}
 // ---- автовыдача: данные товара от продавца, с кнопкой копирования
 function autoBub(m) {
   const lines = String(m.body || "").split("\n"), head = lines.shift() || "", items = lines.filter(Boolean);
@@ -173,7 +179,7 @@ function autoBub(m) {
 // ---- чат: лента сообщений в стиле маркетплейса
 window.CHO = "";
 function bubx(m) {
-  if (m.kind === "system") return `<div class="fsys" id="m${m.id}"><div class="otn"><b>Система</b><span class="tag">оповещение</span><time>${new Date(m.created_at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</time></div><div class="otb"><i>i</i><p>${ordLink(esc(m.body), m.order_id)}${m.order_id ? ` <a class="lk" onclick="go('/order/${m.order_id}')">Открыть заказ</a>` : ""}</p></div></div>`;
+  if (m.kind === "system") return `<div class="fsys" id="m${m.id}"><div class="otn"><b>Система</b><span class="tag">оповещение</span><time>${new Date(m.created_at).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</time></div><div class="otb"><i>i</i><p>${ordLink(esc(m.body), m.order_id)}${m.order_id ? ` <a class="lk" onclick="goOrd('${m.order_id}','${(/#([0-9A-Fa-f]{6,12})/.exec(m.body) || [])[1] || ""}')">Открыть заказ</a>` : ""}</p></div></div>`;
   if (m.kind === "auto") return autoBub(m);
   const mine = m.sender_id === ME.id, c = window.CHA || {}, name = mine ? ME.username : (m.sender_name || c.n || window.CHO || "Собеседник"), stf = m.kind === "staff" ? `<span class="tag">модератор</span>` : "", txt = m.body === "[вложение]" ? "" : esc(m.body), need = !mine && window.TR && TR.lang() && txt;
   const lot = m.lot_title && m.listing_id ? `<a class="lotc" onclick="go('/l/${m.listing_id}')">По лоту: ${esc(m.lot_title)}</a>` : "";
@@ -187,7 +193,7 @@ async function msgs(cid) {
   else UNREAD = cs.reduce((a, c) => a + c.unread, 0);
   const tm = c => c.last_at ? new Date(c.last_at).toLocaleDateString("ru-RU", { day: "numeric", month: "short" }) : "";
   const list = cs.map(c => `<a class="cr ${c.unread ? "un" : ""} ${c.id === cid ? "cur" : ""}" onclick="go('/chat/${c.id}')">${avs(c.other, c.avatar_media, c.online, c.avatar_preset)}<span class="cb"><span class="row bet" style="flex-wrap:nowrap"><b>${esc(c.other)}</b><small class="m">${tm(c)}</small></span><span class="m">${esc(c.last || "Нет сообщений")}</span></span>${c.unread ? `<b class="bd" style="position:static">${c.unread}</b>` : ""}</a>`).join("") || empty("Диалогов пока нет. Откройте объявление или профиль пользователя и напишите ему.");
-  const head = cur ? `<div class="chh2"><a class="bk" onclick="go('/m')" aria-label="Назад">‹</a><a class="chu" onclick="go('/u/${encodeURIComponent(cur.other)}')">${avs(cur.other, cur.avatar_media, cur.online, cur.avatar_preset)}<span class="cb"><b>${esc(cur.other)}</b><small class="${on ? "on-s" : "m"}">${on ? "Онлайн" : "Не в сети"}</small></span></a><button class="ib2" onclick="go('/u/${encodeURIComponent(cur.other)}')" aria-label="Профиль">${svg(P.me)}</button><button class="ib2" onclick="go('/tickets?new=1')" aria-label="Поддержка и жалоба">${svg(IC.warn)}</button></div>` : "";
+  const head = cur ? `<div class="chh2"><a class="bk" onclick="go('/m')" aria-label="Назад">‹</a><a class="chu" onclick="go('/u/${encodeURIComponent(cur.other)}')">${avs(cur.other, cur.avatar_media, cur.online, cur.avatar_preset)}<span class="cb"><b>${esc(cur.other)}</b><small data-seen="${esc(cur.other)}" class="${on ? "on-s" : "m"}">${on ? "Онлайн" : seenLabel(cur.other)}</small></span></a><button class="ib2" onclick="go('/u/${encodeURIComponent(cur.other)}')" aria-label="Профиль">${svg(P.me)}</button><button class="ib2" onclick="go('/tickets?new=1')" aria-label="Поддержка и жалоба">${svg(IC.warn)}</button></div>` : "";
   const body = cur ? `${head}<div class="chm" id="chm">${bubs(ms)}</div><div id="achip"></div><div class="cmp cmp2 cmp3"><input id="lt" maxlength="2000" placeholder="Написать..." enterkeyhint="send" onkeydown="if(event.key==='Enter')sendC()"><button class="ib2" onclick="pickAtt('chat')" aria-label="Вложение">${svg(P.clip)}</button><button class="ib2 pri" onclick="sendC()" aria-label="Отправить">${svg(IC.arr)}</button></div>` : '<p class="m" style="margin:auto">Выберите диалог</p>';
   return `<div class="mm ${cid ? "ch" : ""}"><section class="ml"><h2>Сообщения</h2>${list}</section><section class="mc ${cur ? "mc2" : ""}">${body}</section></div>`;
 }
@@ -208,9 +214,9 @@ function rtgS(r, c1, c2) { return r === "owner" ? "" : rtg(r, c1, c2) }
 // ---- кастом карточки лота
 const CST = [["flat", "Обычная"], ["glow", "Свечение"], ["gradient", "Градиент"], ["outline", "Рамка"], ["dashed", "Пунктир"], ["neon", "Неон"], ["stripe", "Полосы"], ["dots", "Точки"], ["shine", "Блик"], ["double", "Двойная"], ["glass", "Стекло"], ["top", "Верхняя линия"]];
 const CBG = ["Хит", "Новинка", "Выгодно", "Топ", "Быстро", "Гарант", "Редкость", "Акция"];
-function cardCls(l) { const c = l.card; return c && c.accent ? "cs-" + (c.style || "flat") + (c.shape ? " sh-" + c.shape : "") : "" }
-function cardSt(l) { const c = l.card; return c && HX.test(c.accent||"") ? `style="--ca:${c.accent};--cb:${HX.test(c.accent2||"") ? c.accent2 : c.accent}"` : "" }
-function cardBadge(l) { const c = l.card; return c && c.accent && c.badge ? `<span class="cbd">${esc(c.badge)}</span>` : "" }
+function cardCls(l) { return "" }
+function cardSt(l) { return "" }
+function cardBadge(l) { return "" }
 let CARDV = { style: "flat", accent: "#8B5CF6" }, CARDID = "";
 async function cardForm(id) {
   need(); const l = await api("/listings/" + id); CARDID = id; const c = l.card || {}; CARDV = { style: c.style || "flat", accent: c.accent || "#8B5CF6", accent2: c.accent2 || "", badge: c.badge || "", shape: c.shape || "", title: !!c.title };
@@ -337,7 +343,7 @@ ${pr ? `<div class="ckpr"><span><b>${esc(pr.code)}</b>${pct ? ` · скидка 
 });
 const payDo = act(async () => {
   if (window._paying) return; window._paying = 1; const id = window._pay.id;
-  try { const r = await api(`/orders/${id}/pay-balance`, { method: "POST" }); $("#md")?.remove(); mdl(`<div style="text-align:center"><div class="okc">✓</div><h3 style="margin:8px 0 2px">Оплата прошла</h3><p class="m" style="margin:0 0 10px">Заказ #${esc(r.number || "")} оплачен ${new Date().toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</p></div>${ckSteps(1)}<p class="m" style="margin:10px 0">Сообщение об оплате отправлено продавцу в чат, он выдаст товар. Когда всё получите, нажмите «Подтвердить получение» в заказе.</p><button class="btn pri" style="width:100%" onclick="$('#md').remove();go('/order/${id}')">Открыть страницу заказа</button>`); SFX.play && SFX.play("ok"); go("/order/" + id) }
+  try { const r = await api(`/orders/${id}/pay-balance`, { method: "POST" }); $("#md")?.remove(); mdl(`<div style="text-align:center"><div class="okc">✓</div><h3 style="margin:8px 0 2px">Оплата прошла</h3><p class="m" style="margin:0 0 10px">Заказ #${esc(r.number || "")} оплачен ${new Date().toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}</p></div>${ckSteps(1)}<button class="btn pri big" style="width:100%;margin-top:14px" onclick="$('#md').remove();go('/order/${id}')">Перейти к заказу</button>`); SFX.play && SFX.play("ok") }
   finally { window._paying = 0 }
 });
 const payTop = act(async () => { if (window._paying) return; window._paying = 1; try { await api("/finance/topup", { method: "POST", body: { amount: Math.max(10, window._pay.need) } }) } finally { window._paying = 0 } await payConfirm(window._pay.id) });
