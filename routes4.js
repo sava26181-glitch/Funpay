@@ -244,9 +244,6 @@ export default function routes4(app, { q, pool, tx, E, wrap, need, pushUser, L, 
           await q("insert into pw_resets(user_id,code_hash,kind,expires_at) values($1,$2,'email',now()+interval '15 minutes')", [u.id, h(code)]);
           try { await sendMail({ to: u.email, subject: "Код для сброса пароля DonutPay", text: `Ваш код для сброса пароля DonutPay: ${code}\n\nКод действует 15 минут. Если вы не запрашивали сброс, просто проигнорируйте это письмо: пароль не изменится.` }); }
           catch (e) { console.error("[mail] reset send failed:", e.message); }
-        } else if (u.telegram_id && process.env.TELEGRAM_BOT_TOKEN && hooks.tgSend) {
-          const code = mkCode(); await q("insert into pw_resets(user_id,code_hash,kind,expires_at) values($1,$2,'telegram',now()+interval '15 minutes')", [u.id, h(code)]);
-          try { await hooks.tgSend(u.telegram_id, `Код для сброса пароля DonutPay: ${code}\nДействует 15 минут. Если это были не вы, просто проигнорируйте сообщение.`); } catch {}
         }
       }
     }
