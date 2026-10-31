@@ -130,7 +130,7 @@
     const tabs = document.querySelector("#app .tabs"); if (!tabs || tabs.dataset.v17) return; tabs.dataset.v17 = 1;
     try {
       const c = await api("/admin/counts");
-      $$("a", tabs).forEach(a => { const m = /tab=([a-z]+)/.exec(a.getAttribute("onclick") || ""); if (!m) return; const n = c[m[1]]; if (n > 0) a.insertAdjacentHTML("beforeend", `<b class="tbn">${n}</b>`) });
+      $$("a", tabs).forEach(a => { const m = /tab=([a-z]+)/.exec(a.getAttribute("onclick") || ""); if (!m) return; const n = m[1] === "more" ? c.withdrawals : (m[1] === "orders" ? 0 : c[m[1]]); if (n > 0) a.insertAdjacentHTML("beforeend", `<b class="tbn">${n}</b>`) });
       if (tab === "listings") $$("#app .tabs ~ .tabs a").forEach(a => { const m = /st=([a-z]+)/.exec(a.getAttribute("onclick") || ""); if (m && m[1] === "pending" && c.listings > 0) a.insertAdjacentHTML("beforeend", `<b class="tbn">${c.listings}</b>`); });
     } catch { }
     if (GROUPS[tab]) {

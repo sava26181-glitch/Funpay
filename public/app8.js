@@ -88,23 +88,27 @@ ${o.disputes.length ? `<h3>Споры</h3>${o.disputes.map(d => `<div class="car
   // разделы: актуальные / неактуальные
   const ACTIVE = new Set(["open", "in_review", "awaiting_info", "new", "awaiting_user", "Открыт", "Рассматривается", "Нужна информация", "Новое", "Ожидает ответа"]);
   window._sec = window._sec || {};
-  function sections(key, cards, before) {
+  function sections(key, cards, before, cfg) {
     cards = cards.filter(c => c.querySelector(".tag")); if (!cards.length) return;
     if (document.querySelector('.secb[data-k="' + key + '"]')) return;
-    const cnt = { a: 0, n: 0 };
-    cards.forEach(c => { const t = c.querySelector(".tag"), raw = t.textContent.trim(); if (DS[raw]) t.textContent = DS[raw]; const g = ACTIVE.has(raw) ? "a" : "n"; c.dataset.sg = g; cnt[g]++ });
+    const grp = cfg ? cfg.group : raw => (ACTIVE.has(raw) ? "a" : "n");
+    const labs = cfg ? cfg.labels : { a: "Актуальные", n: "Неактуальные" };
+    const cnt = {}; Object.keys(labs).forEach(k => cnt[k] = 0);
+    cards.forEach(c => { const t = c.querySelector(".tag"), raw = t.textContent.trim(); if (DS[raw]) t.textContent = DS[raw]; const g = grp(raw); c.dataset.sg = g; cnt[g]++ });
     const bar = document.createElement("div"); bar.className = "tabs admf secb"; bar.dataset.k = key;
-    bar.innerHTML = `<button data-f="a">Актуальные <small>${cnt.a}</small></button><button data-f="n">Неактуальные <small>${cnt.n}</small></button><button data-f="all">Все <small>${cards.length}</small></button>`;
+    bar.innerHTML = Object.keys(labs).map(k => `<button data-f="${k}">${labs[k]} <small>${cnt[k]}</small></button>`).join("") + `<button data-f="all">Все <small>${cards.length}</small></button>`;
+    const first = Object.keys(labs)[0];
     const apply = f => { window._sec[key] = f; bar.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.f === f)); cards.forEach(c => { c.style.display = (f === "all" || c.dataset.sg === f) ? "" : "none" }) };
     bar.addEventListener("click", e => { const b = e.target.closest("button"); if (b) apply(b.dataset.f) });
     (before || cards[0]).insertAdjacentElement("beforebegin", bar);
-    apply(window._sec[key] || (cnt.a ? "a" : "all"));
+    apply(window._sec[key] || (cnt[first] ? first : "all"));
   }
+  const TK_ADM = { labels: { a: "Нужен ответ", p: "Ждём клиента", n: "Закрытые" }, group: r => ["Новое", "Рассматривается", "new", "in_review"].includes(r) ? "a" : (["Ожидает ответа", "awaiting_user"].includes(r) ? "p" : "n") };
   function decorate() {
     const h = location.hash;
     if (/^#\/admin/.test(h)) {
       const tab = new URLSearchParams(h.split("?")[1] || "").get("tab") || "listings";
-      if (tab === "disputes" || tab === "tickets") sections("adm-" + tab, $$("#app > .card.row"));
+      if (tab === "disputes" || tab === "tickets") sections("adm-" + tab, $$("#app > .card.row"), null, tab === "tickets" ? TK_ADM : null);
     } else if (/^#\/tickets\/?(\?|$)/.test(h) && !/new=1/.test(h)) {
       const app = document.getElementById("app"); if (!app) return;
       $$("h2", app).forEach(hd => { const key = "u-" + hd.textContent.trim(); if (!/^Мои (обращения|споры)/.test(hd.textContent.trim())) return; const cards = []; let n = hd.nextElementSibling; while (n && n.tagName !== "H2") { if (n.classList.contains("card") && n.querySelector(".tag")) cards.push(n); n = n.nextElementSibling } sections(key, cards, cards[0]) });
