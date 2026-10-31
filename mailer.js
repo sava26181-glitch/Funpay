@@ -2,14 +2,35 @@
 // Вариант 1: Resend (RESEND_API_KEY + MAIL_FROM). Вариант 2: SMTP (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, MAIL_FROM).
 import net from "node:net"; import tls from "node:tls";
 const env = () => process.env;
-export const mailConfigured = () => !!((env().RESEND_API_KEY || env().SMTP_HOST) && env().MAIL_FROM);
+export const mailConfigured = () => !!(env().MAIL_RELAY_URL && env().MAIL_RELAY_SECRET) || !!((env().RESEND_API_KEY || env().BREVO_API_KEY || env().SMTP2GO_API_KEY || (env().MAILJET_API_KEY && env().MAILJET_SECRET_KEY) || env().SMTP_HOST) && env().MAIL_FROM);
+// понятный текст причины вместо "AggregateError"
+export const mailErr = e => { const parts = []; const add = x => { if (!x) return; const c = x.code || x.cause?.code; const m = x.message && x.message !== "fetch failed" ? x.message : ""; parts.push([c, m || (x.address && x.port ? x.address + ":" + x.port : "")].filter(Boolean).join(" ")) }; if (Array.isArray(e?.errors) && e.errors.length) e.errors.forEach(add); else if (e?.cause?.errors?.length) e.cause.errors.forEach(add); else { add(e?.cause); if (!parts.length) add(e) } const t = [...new Set(parts.filter(Boolean))].join("; ") || String(e?.message || e); return /ETIMEDOUT|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH/.test(t) ? t + " (сервер не может подключиться к почтовому серверу: на бесплатном Render SMTP-порты закрыты, используйте API-способ: Brevo, Mailjet, SMTP2GO или Resend)" : t };
 const addr = s => (/<([^>]+)>/.exec(s) || [null, s])[1].trim();
 const b64 = s => Buffer.from(s, "utf8").toString("base64");
 const clean = s => String(s).replace(/[\r\n]+/g, " ");
 
 async function viaResend({ to, subject, text }) {
   const r = await fetch(env().RESEND_URL || "https://api.resend.com/emails", { method: "POST", headers: { Authorization: "Bearer " + env().RESEND_API_KEY, "Content-Type": "application/json" }, body: JSON.stringify({ from: env().MAIL_FROM, to: [to], subject, text }) });
-  if (!r.ok) throw new Error("mail provider " + r.status);
+  if (!r.ok) { let d = ""; try { d = (await r.json()).message || "" } catch { } throw new Error("Resend " + r.status + (d ? ": " + d : "")) }
+}
+
+const fromParts = () => { const m = /^\s*(?:"?([^"<]*?)"?\s*)?<([^>]+)>\s*$/.exec(env().MAIL_FROM); return m ? { name: (m[1] || "DonutPay").trim() || "DonutPay", email: m[2].trim() } : { name: "DonutPay", email: env().MAIL_FROM.trim() } };
+async function viaSmtp2go({ to, subject, text }) {
+  const f = fromParts();
+  const r = await fetch(env().SMTP2GO_URL || "https://api.smtp2go.com/v3/email/send", { method: "POST", headers: { "Content-Type": "application/json", accept: "application/json" }, body: JSON.stringify({ api_key: env().SMTP2GO_API_KEY, sender: `${f.name} <${f.email}>`, to: [to], subject, text_body: text }) });
+  let d = {}; try { d = await r.json() } catch { }
+  if (!r.ok || (d.data && d.data.error)) throw new Error("SMTP2GO " + r.status + (d.data?.error ? ": " + d.data.error : ""));
+}
+async function viaMailjet({ to, subject, text }) {
+  const f = fromParts();
+  const r = await fetch(env().MAILJET_URL || "https://api.mailjet.com/v3.1/send", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Basic " + Buffer.from(env().MAILJET_API_KEY + ":" + env().MAILJET_SECRET_KEY).toString("base64") }, body: JSON.stringify({ Messages: [{ From: { Email: f.email, Name: f.name }, To: [{ Email: to }], Subject: subject, TextPart: text }] }) });
+  let d = {}; try { d = await r.json() } catch { }
+  if (!r.ok) throw new Error("Mailjet " + r.status + (d.ErrorMessage ? ": " + d.ErrorMessage : d.Messages?.[0]?.Errors?.[0]?.ErrorMessage ? ": " + d.Messages[0].Errors[0].ErrorMessage : ""));
+}
+async function viaBrevo({ to, subject, text }) {
+  const m = /^\s*(?:"?([^"<]*?)"?\s*)?<([^>]+)>\s*$/.exec(env().MAIL_FROM), sender = m ? { name: (m[1] || "DonutPay").trim() || "DonutPay", email: m[2].trim() } : { name: "DonutPay", email: env().MAIL_FROM.trim() };
+  const r = await fetch(env().BREVO_URL || "https://api.brevo.com/v3/smtp/email", { method: "POST", headers: { "api-key": env().BREVO_API_KEY, "Content-Type": "application/json", accept: "application/json" }, body: JSON.stringify({ sender, to: [{ email: to }], subject, textContent: text }) });
+  if (!r.ok) { let d = ""; try { d = (await r.json()).message || "" } catch { } throw new Error("Brevo " + r.status + (d ? ": " + d : "")) }
 }
 
 function viaSmtp({ to, subject, text }) {
@@ -43,8 +64,18 @@ function viaSmtp({ to, subject, text }) {
   });
 }
 
+async function viaRelay({ to, subject, text }) {
+  const r = await fetch(env().MAIL_RELAY_URL.replace(/\/+$/, "").replace(/\/exec$/, "/exec") + (/\/exec$/.test(env().MAIL_RELAY_URL) ? "" : "/send"), { method: "POST", redirect: "follow", headers: { "Content-Type": "text/plain;charset=utf-8", "X-Relay-Secret": env().MAIL_RELAY_SECRET }, body: JSON.stringify({ to, subject, text, secret: env().MAIL_RELAY_SECRET }), signal: AbortSignal.timeout(30000) });
+  let d = {}; try { d = await r.json() } catch { }
+  if (!r.ok || d.ok !== true) throw new Error("Relay " + r.status + (d.error ? ": " + d.error : ""));
+}
+
 export async function sendMail(o) {
   if (!mailConfigured()) throw new Error("mail not configured");
+  if (env().MAIL_RELAY_URL && env().MAIL_RELAY_SECRET) return viaRelay(o);
   if (env().RESEND_API_KEY) return viaResend(o);
+  if (env().BREVO_API_KEY) return viaBrevo(o);
+  if (env().SMTP2GO_API_KEY) return viaSmtp2go(o);
+  if (env().MAILJET_API_KEY && env().MAILJET_SECRET_KEY) return viaMailjet(o);
   return viaSmtp(o);
 }
