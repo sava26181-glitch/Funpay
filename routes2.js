@@ -126,7 +126,7 @@ export default function routes2(app, { q, pool, tx, E, wrap, need, online, B, ho
   const cleanAttrs = a => Object.fromEntries(Object.entries(a || {}).filter(([k, v]) => /^[a-z_]{1,30}$/.test(k) && !/pass|pwd|token|secret|key/i.test(k) && ["string", "number"].includes(typeof v)).slice(0, 12).map(([k, v]) => [k, String(v).slice(0, 200)]));
   app.patch("/api/listings/:id", need, wrap(async (req, res) => {
     const b = req.body || {}, price = Math.round(+b.price * 100), stock = +b.stock;
-    if (String(b.title || "").length < 5 || b.title.length > 120 || !(price > 0) || !Number.isInteger(stock) || stock < 0) throw E(400, "invalid input");
+    if (String(b.title || "").length < 5 || b.title.length > 120 || !(price > 0) || !Number.isInteger(stock) || stock < 0) throw E(400, "invalid input"); if (price > 2000000000 || stock > 1000000) throw E(400, "invalid input");
     const [l] = await q("select * from listings where id=$1 and (seller_id=$2 or exists(select 1 from users x where x.id=$2 and x.role in ('admin','owner')))", [req.params.id, req.user.id]); if (!l) throw E(404, "not found");
     let cat = l.category_id; if (b.category) { const [c] = await q("select id from categories where slug=$1", [b.category]); if (!c) throw E(400, "unknown category"); cat = c.id; }
     let img = l.image_media; if (b.image === null) img = null; else if (b.image) { const [m] = await q("select id from media where id=$1 and owner_id=$2 and kind='listing'", [b.image, req.user.id]); if (!m) throw E(400, "bad image"); img = m.id; }
@@ -257,7 +257,16 @@ export default function routes2(app, { q, pool, tx, E, wrap, need, online, B, ho
     await q("update disputes set status=$2,resolution=$3,resolved_by=(select id from users where id=$4) where id=$1", [req.params.id, status, String(resolution).slice(0, 2000), req.user.id]); await audit(req.user.id, "dispute_resolve", "dispute", req.params.id, { status });
     if (status === "closed") await tx(async c => { const { rows: [d] } = await c.query("select order_id from disputes where id=$1", [req.params.id]); if (d) await hooks.releaseHold?.(c, d.order_id); });
     if (status !== "closed" && hooks.settleOrder) await tx(async c => { const { rows: [o] } = await c.query("select o.* from disputes d join orders o on o.id=d.order_id where d.id=$1 for update of o", [req.params.id]); if (!o) return; const cap = status === "resolved_buyer" ? await hooks.captureHold?.(c, o) : null; if (status === "resolved_seller") await hooks.releaseHold?.(c, o.id); if (!cap) await hooks.settleOrder(c, o, status === "resolved_buyer" ? "buyer" : "seller"); });
-    await tx(async c => { const { rows: [d] } = await c.query("select order_id from disputes where id=$1", [req.params.id]); if (d) hooks.pushSys?.(await hooks.sysMsg?.(c, d.order_id, status, req.user.id)); });
+    await tx(async c => {
+      const { rows: [d] } = await c.query("select order_id from disputes where id=$1", [req.params.id]); if (!d) return;
+      // после решения заказ не должен навсегда оставаться в статусе «спор»
+      let ns = status === "resolved_buyer" ? "cancelled" : status === "resolved_seller" ? "completed" : null;
+      if (!ns) { const { rows: [pe] } = await c.query("select status from order_events where order_id=$1 and status<>'dispute' order by id desc limit 1", [d.order_id]); ns = ["paid", "in_progress", "completed"].includes(pe?.status) ? pe.status : "in_progress"; }
+      const { rowCount } = await c.query("update orders set status=$2,updated_at=now() where id=$1 and status='dispute' and not exists(select 1 from disputes x where x.order_id=$1 and x.status in ('open','in_review','awaiting_info'))", [d.order_id, ns]);
+      if (rowCount) await c.query("insert into order_events(order_id,status,actor_id) values($1,$2,$3)", [d.order_id, ns, req.user.id]);
+      if (rowCount && ns === "cancelled") await c.query("update listings l set stock=l.stock+o.quantity,updated_at=now() from orders o where o.id=$1 and l.id=o.listing_id and not coalesce(l.auto_delivery,false)", [d.order_id]); // товар не выдан: возвращаем его на склад
+      hooks.pushSys?.(await hooks.sysMsg?.(c, d.order_id, status, req.user.id));
+    });
     res.json({ ok: true });
   }));
   // модератор пишет прямо в общий чат сторон спора: оба участника видят сообщение в обычном чате и на странице заказа
@@ -311,9 +320,9 @@ export default function routes2(app, { q, pool, tx, E, wrap, need, online, B, ho
   app.post("/api/admin/users/:id/block", need, staff(...ST), wrap(async (req, res) => {
     const h = +req.body?.hours, reason = String(req.body?.reason || ""); if (!(h >= 1 && h <= 8760) || reason.length < 3) throw E(400, "hours and reason required");
     const [t] = await q("select role from users where id=$1", [req.params.id]); if (!t || req.params.id === req.user.id || t.role === "owner" || (t.role !== "user" && req.role !== "owner")) throw E(403, "forbidden");
-    await q("update users set blocked_until=now()+($2||' hours')::interval,block_reason=$3,block_hours=$4 where id=$1", [req.params.id, String(Math.floor(h)), reason.slice(0, 500), Math.floor(h)]); await audit(req.user.id, "user_block", "user", req.params.id, { hours: h, reason }); res.json({ ok: true });
+    await q("update users set blocked_until=now()+($2||' hours')::interval,block_reason=$3,block_hours=$4 where id=$1", [req.params.id, String(Math.floor(h)), reason.slice(0, 500), Math.floor(h)]); blkC.delete(req.params.id); hooks.clearBlk?.(); await audit(req.user.id, "user_block", "user", req.params.id, { hours: h, reason }); res.json({ ok: true });
   }));
-  app.post("/api/admin/users/:id/unblock", need, staff(...ST), wrap(async (req, res) => { await q("update users set blocked_until=null,block_reason=null,block_hours=null where id=$1", [req.params.id]); await audit(req.user.id, "user_unblock", "user", req.params.id); res.json({ ok: true }); }));
+  app.post("/api/admin/users/:id/unblock", need, staff(...ST), wrap(async (req, res) => { await q("update users set blocked_until=null,block_reason=null,block_hours=null where id=$1", [req.params.id]); blkC.delete(req.params.id); hooks.clearBlk?.(); await audit(req.user.id, "user_unblock", "user", req.params.id); res.json({ ok: true }); }));
   app.post("/api/admin/users/:id/role", need, staff(...AD), wrap(async (req, res) => {
     const r = req.body?.role; if (!["user", "moderator", "admin"].includes(r) || req.params.id === req.user.id) throw E(400, "bad role");
     const [t] = await q("select role from users where id=$1", [req.params.id]); if (!t || t.role === "owner") throw E(403, "forbidden"); if ((r === "admin" || t.role === "admin") && req.role !== "owner") throw E(403, "only owner can manage admins");

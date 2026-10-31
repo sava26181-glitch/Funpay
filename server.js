@@ -29,9 +29,10 @@ await pool.query(fs.readFileSync(path.join(dir, "schema_v14.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v15.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v16.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v17.sql"), "utf8"));
+await pool.query(fs.readFileSync(path.join(dir, "schema_v18.sql"), "utf8"));
 
 const app = express(); app.set("trust proxy", 1);
-app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], fontSrc: ["https://fonts.gstatic.com"], scriptSrc: ["'self'", "'unsafe-inline'"], scriptSrcAttr: ["'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:", "https://*.supabase.co"], connectSrc: ["'self'"] } } }));
+app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"], mediaSrc: ["'self'", "blob:", "data:", "https://*.supabase.co"], scriptSrc: ["'self'", "'unsafe-inline'"], scriptSrcAttr: ["'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:", "https://*.supabase.co"], connectSrc: ["'self'"] } } }));
 app.use(express.json({ limit: "50kb" })); app.use(cookieParser());
 app.get("/health", (_, r) => r.send("ok"));
 const wrap = f => (req, res, next) => Promise.resolve(f(req, res, next)).catch(next);
@@ -90,6 +91,7 @@ routes8(app, { q, pool, tx, E, wrap, need, hooks, pushUser, online: uid => onlin
 app.get("/api/listings", wrap(async (req, res) => {
   const { game, category, min, max, q: s, seller, sort, offset } = req.query, w = ["l.status='active'"], p = [];
   const add = (c, v) => { p.push(v); w.push(c.replaceAll("?", "$" + p.length)); };
+  w.push("l.stock>0"); // проданные до нуля лоты не показываем в каталоге (продавец видит их в «Мои объявления»)
   if (game) add("g.slug=?", game); if (category) add("c.slug=?", category); if (seller) add("u.username=?", seller);
   if (+min > 0) add("l.price_cents>=?", Math.round(+min * 100)); if (+max > 0) add("l.price_cents<=?", Math.round(+max * 100));
   if (s) add("(l.title ilike ? or l.summary ilike ?)", "%" + s + "%");
@@ -108,6 +110,7 @@ app.get("/api/my/listings", need, wrap(async (req, res) => res.json(await q(`sel
 const lbody = b => {
   const price = Math.round(+b.price * 100), stock = +b.stock || 1;
   if (String(b.title || "").length < 5 || b.title.length > 120 || !(price > 0) || !Number.isInteger(stock) || stock < 1) throw E(400, "invalid input");
+  if (price > 2000000000 || stock > 1000000) throw E(400, "invalid input");
   return [b.title, (b.summary || "").slice(0, 300), (b.details || "").slice(0, 3000), price, stock, (b.delivery_time || "").slice(0, 40)];
 };
 app.post("/api/listings", need, wrap(async (req, res) => {
@@ -235,7 +238,7 @@ app.use(express.static(path.join(dir, "public"), { etag: true, lastModified: fal
 app.use("/api", (_, res) => res.status(404).json({ error: "not found" }));
 app.use(async (e, req, res, _next) => {
   if (res.headersSent) { console.error("handler error after response:", e.message); return; }
-  if (e.code === "22P02") e = E(400, "invalid id"); if (e.code === "23505") e = E(409, "already exists");
+  if (e.code === "22P02") e = E(400, "invalid id"); if (e.code === "23505") e = E(409, "already exists"); if (e.code === "23503") e = E(404, "not found"); if (["22003", "22001", "23502", "22007", "22008"].includes(e.code)) e = E(400, "invalid input");
   let staffDetail = null; if (!e.status && req.user) { try { const [u] = await q("select role from users where id=$1", [req.user.id]); if (["moderator", "admin", "owner"].includes(u?.role)) staffDetail = String(e.message).slice(0, 300) + (e.where ? " @" + String(e.where).slice(0, 80) : ""); } catch {} }
   if (!e.status) console.error(e); res.status(e.status || 500).json({ error: e.status ? e.message : "server error", ...(!e.status && e.code && String(req.path).startsWith("/api/admin") ? { code: e.code, detail: String(e.message).slice(0, 200) } : {}), ...(!e.status && e.code ? { ref: e.code } : {}), ...(!e.status && process.env.DEBUG_ERRORS === "true" ? { detail: String(e.message).slice(0, 300) } : {}), ...(staffDetail ? { detail: staffDetail } : {}) });
 });

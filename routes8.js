@@ -15,6 +15,7 @@ export default function routes8(app, { q, pool, tx, E, wrap, need, hooks, pushUs
     if (b.u?.blocked_until && new Date(b.u.blocked_until) > new Date()) return res.status(403).json({ error: "account blocked", blocked_until: b.u.blocked_until, block_reason: b.u.block_reason, block_hours: b.u.block_hours, username: b.u.username });
     next();
   }));
+  hooks.clearBlk = () => blk.clear();
   app.post("/api/admin/users/:id/block", (req, _res, next) => { blk.clear(); next(); });
   app.post("/api/admin/users/:id/unblock", (req, _res, next) => { blk.clear(); next(); });
 

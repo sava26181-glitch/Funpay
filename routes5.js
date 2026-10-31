@@ -118,8 +118,9 @@ export default function routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUs
       const { rows: [o] } = await c.query("select * from orders where id=$1 for update", [req.params.id]);
       if (!o || o.buyer_id !== req.user.id) throw E(404, "not found"); if (o.status !== "pending_payment") throw E(409, "order is not awaiting payment"); if (o.partner_id) throw E(409, "balance payment is not available for group orders yet");
       if (o.promo_id) { const bad = await promoCheck(c, o.promo_id, o.buyer_id, o.id, Number(o.total_cents) + Number(o.discount_cents)); if (bad) throw E(409, "Промокод больше не действует: " + PERR[bad] + ". Уберите его и оплатите снова"); await c.query("insert into promo_uses(promo_id,user_id,order_id,discount_cents) values($1,$2,$3,$4) on conflict do nothing", [o.promo_id, o.buyer_id, o.id, o.discount_cents]); await c.query("update promo_codes set uses=uses+1 where id=$1", [o.promo_id]); }
-      const { rows: [al] } = await c.query("select auto_delivery,auto_items from listings where id=$1 for update", [o.listing_id]);
+      const { rows: [al] } = await c.query("select auto_delivery,auto_items,stock from listings where id=$1 for update", [o.listing_id]);
       if (al?.auto_delivery && (al.auto_items || []).length < o.quantity) throw E(409, "Товар закончился: продавец ещё не пополнил автовыдачу");
+      if (al && !al.auto_delivery) { if (al.stock < o.quantity) throw E(409, "Товар закончился: другой покупатель успел раньше"); await c.query("update listings set stock=stock-$2,updated_at=now() where id=$1", [o.listing_id, o.quantity]); }
       await move(c, o.buyer_id, "order_payment", -(o.total_cents / 100), "order", o.id, "pay:" + o.id);
       await c.query("update orders set status='paid',payment_status='confirmed',updated_at=now() where id=$1", [o.id]);
       await c.query("insert into order_events(order_id,status,actor_id) values($1,'paid',$2)", [o.id, req.user.id]);
