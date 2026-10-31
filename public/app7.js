@@ -53,7 +53,7 @@
 
   // ======================= Что смотрит собеседник (вместо «По лоту») =======================
   let vwTimer = null, vwSent = null;
-  async function vwSend(id) { if (vwSent === id) return; vwSent = id; try { await fetch("/api/viewing", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ listingId: id }) }) } catch { } }
+  async function vwSend(id) { if (vwSent === id || typeof ME === "undefined" || !ME) return; vwSent = id; try { await fetch("/api/viewing", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ listingId: id }) }) } catch { } }
   async function vwFill() {
     const bar = document.getElementById("vwb"); if (!bar) return; const name = window.CHO; if (!name) return;
     try {
