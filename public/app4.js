@@ -229,7 +229,7 @@ function cardPrev() { const e = $("#cprev"); if (e) e.innerHTML = `<div class="r
 const cardSave = act(async reset => { await api(`/listings/${CARDID}/card`, { method: "PUT", body: reset === true ? {} : CARDV }); $("#md")?.remove(); toast("Сохранено"); route() });
 
 // ---- подвал и документы
-let SITE_CFG = {};
+let SITE_CFG = window.SITE_CFG0 || {};
 fetch("/api/site-config").then(r => r.json()).then(c => { SITE_CFG = c; const f = document.querySelector("#ft"); if (f) f.innerHTML = ftHtml() }).catch(() => { });
 function ftHtml() {
   const c = SITE_CFG, ext = (u, t) => `<a href="${esc(u)}" target="_blank" rel="noopener">${t}</a>`, ins = (k, t) => `<a onclick="go('/legal/${k}')">${t}</a>`;
@@ -237,6 +237,7 @@ function ftHtml() {
   const sup = [c.support_tg ? `Telegram: <a href="https://t.me/${esc(c.support_tg)}" target="_blank" rel="noopener">@${esc(c.support_tg)}</a>` : "", c.support_email ? `Email: <a href="mailto:${esc(c.support_email)}">${esc(c.support_email)}</a>` : ""].filter(Boolean).join(" · ");
   return `${c.channel?`<a class="tgb" href="${esc(c.channel)}" target="_blank" rel="noopener"><span class="tgi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.9 4.3c.3-1.2-.9-2.2-2-1.7L2.6 9.9c-1.2.5-1.1 2.2.1 2.6l4.4 1.4 1.7 5.3c.3 1 1.5 1.3 2.3.6l2.5-2.3 4.5 3.3c.8.6 2 .1 2.2-.9l2.6-15.6zM9 13.7l8.8-5.5c.2-.1.4.2.2.3l-7.2 6.7-.3 3.2L9 13.7z"/></svg></span><span class="tgt"><b>Наш Telegram-канал</b><small>Новости, обновления и акции</small></span><span class="tga">›</span></a>`:""}<div class="fl" style="margin-top:14px">${links.join("")}</div>${sup ? `<div class="m" style="margin-top:8px">Поддержка: ${sup}</div>` : ""}<div class="m" style="margin-top:8px">© DonutPay</div>`;
 }
+{ const f0 = document.querySelector("#ft"); if (f0) f0.innerHTML = ftHtml() }
 window.LEGX = {
   rules: () => ["Правила маркетплейса", `<p>DonutPay помогает покупателям и продавцам цифровых товаров и услуг находить друг друга. Пользуясь сайтом, вы соглашаетесь с этими правилами.</p><h3>1. Общее</h3><p>Регистрироваться могут совершеннолетние пользователи. Один человек ведёт один аккаунт. Данные в профиле и объявлениях должны быть правдивыми.</p><h3>2. Что запрещено</h3><p>Обман покупателей и продавцов; продажа товаров, которые вы не вправе продавать; публикация чужих личных данных, паролей и секретных ключей; оскорбления, угрозы и спам; создание нескольких аккаунтов для накрутки отзывов; попытки обойти правила площадки или вывести покупателя на сделку вне сайта.</p><h3>3. Сделки и споры</h3><p>Заказ создаётся на странице лота. Если продавец не выдал товар или выдал не тот, откройте спор в карточке заказа. Спор рассматривает модерация, в нём учитываются переписка и вложения.</p><h3>4. Оплата</h3><p>Приём платежей пока не подключён: заказы создаются со статусом «Ожидает оплаты», деньги не списываются. Условия оплаты и комиссий будут опубликованы до запуска.</p><h3>5. Меры</h3><p>За нарушения мы можем скрыть объявление, ограничить возможности аккаунта или заблокировать его. Продавцу, нарушившему Кодекс продавца, ставится пометка в профиле.</p><h3>6. Контакты</h3><p>Вопросы и жалобы: <a class="lk" onclick="go('/legal/contacts')">страница контактов</a>.</p>`],
   "seller-rules": () => ["Правила продавцов", `<h3>1. Допуск</h3><p>Чтобы публиковать объявления, нужно подписать Кодекс продавца и подтвердить контакт через Telegram-бота.</p><h3>2. Кодекс продавца</h3>${rulesHtml(RULES4)}<p>Нарушение кодекса сжигает его: в профиле появляется пометка, а покупатель видит предупреждение на странице лота.</p><h3>3. Объявления</h3><p>Описывайте товар честно и полно. Указывайте реальное наличие и срок выдачи. Объявления проходят модерацию. Нельзя публиковать пароли и секретные данные в тексте объявления.</p><h3>4. Выдача</h3><p>Выдавайте товар в срок и после выдачи сообщайте об этом покупателю в чате. Переписку по заказу ведите на площадке: она учитывается в спорах.</p><h3>5. Акции</h3><p>Час распродажи и совместные покупки включаются продавцом самостоятельно и действуют только на выбранные лоты.</p><h3>6. Комиссии и выплаты</h3><p>Оплата пока не подключена. Размер комиссии и порядок выплат будут опубликованы до запуска оплаты.</p>`],
@@ -247,7 +248,7 @@ window.LEGX = {
 function resetPage() {
   return `<div class="card" style="max-width:420px;margin:30px auto"><h2 style="margin-top:0">Сброс пароля</h2><p class="m">Введите email. Если аккаунт привязан к Telegram (подтверждение продавца), бот пришлёт одноразовый код на 15 минут. Если привязки нет, напишите в поддержку: администратор выдаст код.</p><label>Email</label><input id="rem" type="email" autocomplete="email"><button class="btn" style="width:100%;margin-top:10px" onclick="resetReq()">Получить код в Telegram</button><hr style="border:0;border-top:1px solid var(--b);margin:16px 0"><label>Код</label><input id="rco" autocomplete="one-time-code" autocapitalize="characters" maxlength="12"><label>Новый пароль (минимум 8 символов)</label><input id="rpw" type="password" autocomplete="new-password"><button class="btn pri" style="width:100%;margin-top:12px" onclick="resetDo()">Сменить пароль</button><p class="m"><a class="lk" onclick="go('/legal/contacts')">Контакты поддержки</a> · <a class="lk" onclick="go('/login')">Вход</a></p></div>`;
 }
-const resetReq = act(async () => { const e = $("#rem").value.trim(); if (!e) throw new Error("Введите email"); await api("/auth/reset/request", { method: "POST", body: { email: e } }); toast("Если аккаунт привязан к Telegram, код отправлен") });
+const resetReq = act(async () => { const e = $("#rem").value.trim(); if (!e) throw new Error("Введите email"); try { await api("/auth/reset/request", { method: "POST", body: { email: e, hp: $("#hp")?.value, cf: window._cf } }) } finally { window.cfReset && cfReset() } toast("Код отправлен") });
 const resetDo = act(async () => { await api("/auth/reset/confirm", { method: "POST", body: { email: $("#rem").value.trim(), code: $("#rco").value, password: $("#rpw").value } }); toast("Пароль изменён. Войдите с новым паролем"); go("/login") });
 const pwCode = act(async name => { const r = await api(`/admin/users/${encodeURIComponent(name)}/reset-code`, { method: "POST" }); mdl(`<h3 style="margin:0 0 8px">Код сброса пароля</h3><p class="m" style="margin:0 0 8px">Передайте код пользователю ${esc(name)} лично. Действует ${r.expires_minutes} минут, одноразовый. Пользователь вводит его на странице «Сброс пароля» вместе со своим email.</p><div class="card" style="font-size:22px;letter-spacing:2px;text-align:center;user-select:all">${esc(r.code)}</div>`) });
 
@@ -302,7 +303,7 @@ function posReset() { if (typeof PV !== "undefined") { PV.pos = {}; pvr() } }
 (function () {
   const vv = window.visualViewport, root = document.documentElement;
   function set() {
-    const kb = !!vv && innerHeight - vv.height > 120, inchat = !!document.querySelector(".mm.ch");
+    const ae = document.activeElement, typing = !!ae && (ae.id === "lt" || ae.id === "otm"), kb = (!!vv && innerHeight - vv.height > 120) || (typing && !document.body.classList.contains("ckb")), inchat = !!document.querySelector(".mm.ch");
     document.body.classList.toggle("inchat", inchat); document.body.classList.toggle("kb", kb);
     const hd = document.querySelector("header"), bn = document.querySelector(".bn");
     root.style.setProperty("--vvh", (vv ? vv.height : innerHeight) + "px"); root.style.setProperty("--vvt", (vv ? vv.offsetTop : 0) + "px");
@@ -313,7 +314,8 @@ function posReset() { if (typeof PV !== "undefined") { PV.pos = {}; pvr() } }
   if (vv) { vv.addEventListener("resize", set); vv.addEventListener("scroll", () => { if (document.body.classList.contains("inchat")) { window.scrollTo(0, 0); set() } }) }
   addEventListener("resize", set); addEventListener("hashchange", () => setTimeout(set, 60));
   const ar = window.afterRoute; window.afterRoute = function () { const r = ar && ar.apply(this, arguments); setTimeout(set, 0); return r };
-  document.addEventListener("focusin", e => { if (e.target && e.target.id === "lt") [60, 250, 500, 900].forEach(d => setTimeout(set, d)) }); document.addEventListener("focusout", e => { if (e.target && e.target.id === "lt") [60, 300, 700].forEach(d => setTimeout(set, d)) });
+  const settle = ms => { const t0 = performance.now(); (function f() { set(); if (performance.now() - t0 < ms) requestAnimationFrame(f) })() };
+  document.addEventListener("focusin", e => { if (e.target && e.target.id === "lt") { settle(1400); [1800, 2600].forEach(d => setTimeout(set, d)) } }); document.addEventListener("focusout", e => { if (e.target && e.target.id === "lt") { settle(900); setTimeout(set, 1300) } });
   set();
 })();
 

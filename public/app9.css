@@ -1,0 +1,42 @@
+/* ===== v31: вход, регистрация, сброс пароля, настройки: всё берёт цвета темы (--p, --pl, --c, --b) ===== */
+.au{max-width:440px;margin:22px auto;padding:28px 22px 22px;border:1px solid var(--b);border-radius:24px;background:radial-gradient(120% 70% at 50% 0%,color-mix(in srgb,var(--p) 16%,transparent),transparent 70%),var(--c);box-shadow:0 18px 50px -24px color-mix(in srgb,var(--p) 55%,transparent)}
+.au-top{text-align:center;margin-bottom:18px}
+.au-logo{width:64px;height:64px;margin:0 auto 12px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--p) 14%,var(--c3));box-shadow:0 0 0 1px color-mix(in srgb,var(--p) 35%,transparent),0 10px 30px -10px var(--p)}
+.au-logo svg{width:30px;height:30px;stroke:var(--pl);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.au h1{font-size:25px;line-height:1.2;margin:0 0 6px;letter-spacing:-.01em}
+.au-s{margin:0;color:var(--m);font-size:14px;line-height:1.45}
+.au .fld{margin-top:14px}.au .fld>label,.sx .fld>label{display:block;margin:0 0 6px;font-size:13px;font-weight:600;color:var(--m)}
+.au input:not([type=checkbox]),.sx input:not([type=checkbox]){width:100%;height:48px;padding:0 14px;border-radius:14px;border:1px solid var(--b);background:var(--inp);font-size:16px;transition:border-color .15s,box-shadow .15s}
+.au input:not([type=checkbox]):focus,.sx input:not([type=checkbox]):focus{outline:0;border-color:var(--p);box-shadow:0 0 0 3px color-mix(in srgb,var(--p) 25%,transparent)}
+.pwr{position:relative}.pwr input{padding-right:46px!important}
+.pwr .eye{position:absolute;right:4px;top:4px;width:40px;height:40px;border:0;background:transparent;color:var(--m);display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:10px;padding:0}
+.pwr .eye svg{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}.pwr .eye.on{color:var(--pl)}
+.au-chk{display:flex;gap:10px;align-items:flex-start;margin-top:16px;padding:12px;border:1px solid var(--b);border-radius:14px;background:var(--inp);font-size:13.5px;line-height:1.4;cursor:pointer}
+.au-chk input{width:20px;height:20px;margin:1px 0 0;flex:none;accent-color:var(--p)}
+.au-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;height:50px;margin-top:20px;border:0;border-radius:14px;background:linear-gradient(135deg,var(--p),color-mix(in srgb,var(--p) 70%,#000));color:var(--pon,#fff);font-size:16px;font-weight:800;cursor:pointer;box-shadow:0 10px 26px -12px var(--p);transition:transform .1s,filter .15s}
+.au-btn:hover{filter:brightness(1.08)}.au-btn:active{transform:scale(.985)}
+.au-btn.sec{background:var(--c3);color:var(--t);box-shadow:none;border:1px solid var(--b);margin-top:12px;height:46px;font-size:15px}
+.au-links{display:flex;flex-wrap:wrap;justify-content:center;gap:6px 16px;margin-top:18px;font-size:14px}
+.au-links a{color:var(--pl);font-weight:600;cursor:pointer}
+.au-hint{margin:14px 0 0;font-size:12.5px;line-height:1.45;color:var(--m);text-align:center}
+.au-st{display:flex;gap:12px;align-items:flex-start;margin-top:18px}
+.au-st .n{flex:none;width:28px;height:28px;border-radius:50%;background:color-mix(in srgb,var(--p) 22%,transparent);color:var(--pl);font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center}
+.au-st b{display:block;font-size:16px;margin-top:3px}.au-st small{display:block;color:var(--m);font-size:12.5px;margin-top:2px}
+.au-sep{height:1px;background:var(--b);margin:22px 0 0;border:0}
+/* настройки */
+.secw{display:flex;flex-direction:column;gap:12px;margin:12px 0}
+.sx{padding:18px 16px!important;border-radius:20px!important}
+.sx .sech{margin:0 0 4px}.sx .sech b{font-size:17px}.sx .sech small{display:block;margin-top:1px}
+.sx .si2{background:linear-gradient(135deg,var(--pl),var(--p))!important}.sx .si2 svg{stroke:var(--pon,#fff)!important}
+.sx .fld{margin-top:12px}
+.sx .pill{margin-left:auto;flex:none;padding:3px 10px;border-radius:99px;font-size:12px;font-weight:700;background:color-mix(in srgb,var(--m) 16%,transparent);color:var(--m)}
+.sx .pill.ok{background:rgba(74,222,128,.14);color:#4ade80}
+.sx .sp{margin:10px 0 0;font-size:13.5px;line-height:1.5;color:var(--m)}
+.sx .btn{margin-top:14px}.sx .btn.pri{min-width:160px;height:46px;border-radius:14px}
+.sx .kcode{background:var(--inp)!important;border:1px dashed color-mix(in srgb,var(--p) 45%,var(--b))!important;border-radius:12px!important}
+.sx .bk8 span{background:var(--inp)!important;border:1px solid var(--b)}
+.tgi{background:linear-gradient(135deg,var(--pl),var(--p))!important}.tgi svg{fill:var(--pon,#fff)!important}
+.tnl button.on{border-color:var(--p)!important;background:color-mix(in srgb,var(--p) 16%,var(--c))!important;box-shadow:0 0 0 1px var(--p) inset!important}
+#stc,#sndc{border-radius:20px!important}
+.tgb{border-color:color-mix(in srgb,var(--p) 30%,var(--b))!important}
+.sx .pill{display:inline-block;margin:6px 0 0!important}.sx .sech>span:nth-child(2){min-width:0}
