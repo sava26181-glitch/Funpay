@@ -9,16 +9,14 @@ Object.assign(ERR, {
 // ---- сброс пароля
 window.resetPage = async function () {
   let info = {}; try { info = await api("/auth/reset/info") } catch { }
-  const via = info.email ? "email" : info.telegram ? "tg" : "none";
-  const lead = via === "email" ? "Введите email аккаунта. Мы отправим на него одноразовый код, он действует 15 минут."
-    : via === "tg" ? "Введите email. Если аккаунт привязан к Telegram (подтверждение продавца), бот пришлёт одноразовый код на 15 минут. Если привязки нет, напишите в поддержку."
-    : "Отправка кодов на почту пока не настроена. Напишите в поддержку: сотрудник выдаст одноразовый код после проверки.";
-  return `<div class="card" style="max-width:420px;margin:30px auto"><h2 style="margin-top:0">Сброс пароля</h2><p class="m">${lead}</p><label>Email</label><input id="rem" type="email" autocomplete="email">${via === "none" ? "" : `<button class="btn" style="width:100%;margin-top:10px" onclick="resetReq()">${via === "email" ? "Отправить код на почту" : "Получить код в Telegram"}</button>`}<hr style="border:0;border-top:1px solid var(--b);margin:16px 0"><label>Код</label><input id="rco" autocomplete="one-time-code" autocapitalize="characters" maxlength="12" inputmode="text"><label>Новый пароль (минимум 8 символов)</label><input id="rpw" type="password" autocomplete="new-password"><button class="btn pri" style="width:100%;margin-top:12px" onclick="resetDo()">Сменить пароль</button><p class="m">Письма нет? Проверьте «Спам». Повторно код можно запросить через минуту.</p><p class="m"><a class="lk" onclick="go('/legal/contacts')">Контакты поддержки</a> · <a class="lk" onclick="go('/login')">Вход</a></p></div>`;
+  const lead = info.email ? "Введите email аккаунта. Мы отправим на него одноразовый код, он действует 15 минут."
+    : "Отправка кодов на почту сейчас недоступна. Напишите в поддержку: сотрудник выдаст одноразовый код после проверки.";
+  return `<div class="card" style="max-width:420px;margin:30px auto"><h2 style="margin-top:0">Сброс пароля</h2><p class="m">${lead}</p><label>Email</label><input id="rem" type="email" autocomplete="email">${info.email ? `<button class="btn" style="width:100%;margin-top:10px" onclick="resetReq()">Отправить код на почту</button>` : ""}<hr style="border:0;border-top:1px solid var(--b);margin:16px 0"><label>Код</label><input id="rco" autocomplete="one-time-code" autocapitalize="characters" maxlength="12" inputmode="text"><label>Новый пароль (минимум 8 символов)</label><input id="rpw" type="password" autocomplete="new-password"><button class="btn pri" style="width:100%;margin-top:12px" onclick="resetDo()">Сменить пароль</button><p class="m">Письма нет? Проверьте «Спам». Повторно код можно запросить через минуту.</p><p class="m"><a class="lk" onclick="go('/legal/contacts')">Контакты поддержки</a> · <a class="lk" onclick="go('/login')">Вход</a></p></div>`;
 };
 window.resetReq = act(async () => {
   const e = $("#rem").value.trim(); if (!e) throw new Error("Введите email");
   await api("/auth/reset/request", { method: "POST", body: { email: e } });
-  toast("Если такой аккаунт есть, код отправлен. Он действует 15 минут");
+  toast("Код отправлен на почту. Он действует 15 минут");
   $("#rco")?.focus();
 });
 
@@ -26,19 +24,18 @@ window.resetReq = act(async () => {
 const _sp = window.settingsPage;
 window.settingsPage = function () {
   const base = _sp();
-  return ME ? base + `<div class="card secc" id="secp"><div class="sk"></div></div>` : base;
+  return ME ? `<h2>Настройки</h2><div class="card secc" id="secp"><div class="sk"></div></div>` + base.replace("<h2>Настройки</h2>", "") : base;
 };
 async function secRender() {
   const box = document.getElementById("secp"); if (!box) return;
   let s; try { s = await api("/me/security") } catch { box.remove(); return }
-  box.innerHTML = `<h3 style="margin-top:0">Безопасность</h3>
-  <b>Смена пароля</b>
+  box.innerHTML = `<div class="sech"><span class="si2"><svg viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/></svg></span><span><b>Пароль</b><small>Смените пароль для входа в аккаунт</small></span></div>
   <label>Текущий пароль</label><input id="pwc" type="password" autocomplete="current-password">
   <label>Новый пароль (минимум 8 символов)</label><input id="pwn" type="password" autocomplete="new-password">
   <label>Повторите новый пароль</label><input id="pwn2" type="password" autocomplete="new-password">
   <button class="btn pri" style="margin-top:10px" onclick="pwChange()">Сменить пароль</button>
   <hr style="border:0;border-top:1px solid var(--b);margin:18px 0">
-  <b>Двухэтапная аутентификация</b>
+  <div class="sech"><span class="si2"><svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg></span><span><b>Двухэтапная аутентификация</b><small>Дополнительная защита аккаунта</small></span></div>
   <p class="m" style="margin:6px 0 0">При входе, кроме пароля, нужен одноразовый код из приложения-аутентификатора (Google Authenticator, Authy, 2FAS и др.).</p>
   <div id="tfbox">${s.twofa
     ? `<p class="ok">Включена</p><p class="m" style="margin:0">Неиспользованных резервных кодов: ${s.backup_left}</p><label>Пароль</label><input id="tfp" type="password" autocomplete="current-password"><label>Код из приложения или резервный код</label><input id="tfd" inputmode="numeric" autocomplete="one-time-code"><button class="btn dng" style="margin-top:10px" onclick="tfOff()">Выключить</button>`
@@ -63,5 +60,15 @@ window.tfOff = act(async () => {
   toast("Двухэтапная аутентификация выключена"); secRender();
 });
 window.secRender = secRender;
+function sndCard() {
+  const cur = (() => { try { return localStorage.dp_tone || "soft" } catch { return "soft" } })();
+  return `<div class="card" id="sndc" style="margin-top:12px"><b>Звук уведомлений</b><p class="m" style="margin:4px 0 0">Нажмите на вариант, чтобы выбрать и услышать. Применяется сразу. Громкость и включение звука настраиваются выше.</p><div class="tnl">${Object.entries(SFX.TONES).map(([k, n]) => `<button type="button" class="${k === cur ? "on" : ""}" onclick="toneSet('${k}')">${n}</button>`).join("")}</div></div>`;
+}
+window.toneSet = k => { try { localStorage.dp_tone = k } catch { } const c = document.getElementById("sndc"); if (c) c.outerHTML = sndCard(); SFX.play("notify", true) };
+function mountSnd() { const st = document.getElementById("stc"); if (st && !document.getElementById("sndc")) st.insertAdjacentHTML("afterend", sndCard()) }
+// проверка почты (админ → вкладка «Боты и хранилище»)
+const _bv = window.botsView;
+window.botsView = async function () { return (await _bv()) + `<div class="card"><b>Почта (коды сброса пароля)</b><p class="m" style="margin:4px 0 8px">Отправит тестовое письмо на email вашего аккаунта и покажет причину, если не получилось.</p><button class="btn pri" onclick="mailTest()">Отправить тестовое письмо</button><div id="mres" style="margin-top:10px"></div></div>` };
+window.mailTest = act(async () => { $("#mres").innerHTML = '<div class="sk"></div>'; const r = await api("/admin/mail/test", { method: "POST" }); $("#mres").innerHTML = r.ok ? `<span class="ok">Письмо отправлено на ${esc(r.to)}. Проверьте почту и «Спам».</span>` : `<span style="color:var(--bad,#f87171);overflow-wrap:anywhere">Ошибка: ${esc(r.error)}</span>` });
 const _ar9 = window.afterRoute;
-window.afterRoute = function () { const r = _ar9 && _ar9.apply(this, arguments); if (/^#\/settings/.test(location.hash)) secRender(); return r };
+window.afterRoute = function () { const r = _ar9 && _ar9.apply(this, arguments); if (/^#\/settings/.test(location.hash)) { secRender(); setTimeout(mountSnd, 60) } return r };
