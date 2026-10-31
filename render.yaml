@@ -17,6 +17,16 @@ services:
         sync: false
       - key: RESEND_API_KEY
         sync: false
+      - key: MAIL_RELAY_URL
+        sync: false
+      - key: MAIL_RELAY_SECRET
+        sync: false
+      - key: TURNSTILE_SITEKEY
+        sync: false
+      - key: TURNSTILE_SECRET
+        sync: false
+      - key: CF_PROXY
+        sync: false
       - key: TG_CHANNEL
         sync: false
       - key: SUPPORT_EMAIL
