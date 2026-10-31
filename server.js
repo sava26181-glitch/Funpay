@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import express from "express"; import helmet from "helmet"; import cookieParser from "cookie-parser";
 import rateLimit from "express-rate-limit"; import bcrypt from "bcryptjs"; import jwt from "jsonwebtoken";
+import { verifyTotp, hashBackup } from "./totp.js"; import routes9 from "./routes9.js";
 import pg from "pg"; import routes2 from "./routes2.js"; import routes3 from "./routes3.js"; import routes7 from "./routes7.js";
 import wf from "./wordfilter.js"; import routes8 from "./routes8.js"; import routes6 from "./routes6.js"; import sysmsg from "./sysmsg.js"; import routes4 from "./routes4.js"; import routes5 from "./routes5.js"; import { makeBadges } from "./badges.js"; import fs from "fs"; import path from "path"; import { fileURLToPath } from "url";
 const dir = path.dirname(fileURLToPath(import.meta.url));
@@ -30,6 +31,7 @@ await pool.query(fs.readFileSync(path.join(dir, "schema_v15.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v16.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v17.sql"), "utf8"));
 await pool.query(fs.readFileSync(path.join(dir, "schema_v18.sql"), "utf8"));
+await pool.query(fs.readFileSync(path.join(dir, "schema_v19.sql"), "utf8"));
 
 const app = express(); app.set("trust proxy", 1);
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"], fontSrc: ["'self'", "data:", "https://fonts.gstatic.com"], mediaSrc: ["'self'", "blob:", "data:", "https://*.supabase.co"], scriptSrc: ["'self'", "'unsafe-inline'"], scriptSrcAttr: ["'unsafe-inline'"], imgSrc: ["'self'", "data:", "blob:", "https://*.supabase.co"], connectSrc: ["'self'"] } } }));
@@ -62,11 +64,31 @@ app.post("/api/auth/register", lim, wrap(async (req, res) => {
   try { const [u] = await q(`insert into users(email,username,password_hash) values($1,$2,$3) returning ${U}`, [email.toLowerCase(), username, await bcrypt.hash(password, 10)]); setCookie(res, u.id); res.json(u); }
   catch (e) { if (e.code === "23505") throw E(409, "email or username taken"); throw e; }
 }));
+// 2FA: проверка кода приложения (с защитой от повторного использования) или резервного кода; не больше 5 ошибок за 15 минут на аккаунт
+const tfFail = new Map();
+const twofaCheck = async (uid, code) => {
+  const f = tfFail.get(uid); if (f && f.n >= 5 && Date.now() - f.t < 15 * 60e3) throw E(429, "too many attempts");
+  const [u] = await q("select totp_secret,totp_backup,totp_last_step from users where id=$1 and totp_enabled", [uid]); let ok = false;
+  if (u) {
+    const st = verifyTotp(u.totp_secret, code);
+    if (st !== null && (u.totp_last_step === null || +st > +u.totp_last_step)) { await q("update users set totp_last_step=$2 where id=$1", [uid, st]); ok = true; }
+    else if (st === null && /^[0-9A-Fa-f]{5}-?[0-9A-Fa-f]{5}$/.test(String(code || "").trim())) {
+      const hsh = hashBackup(code), list = u.totp_backup || [];
+      if (list.includes(hsh)) { await q("update users set totp_backup=$2::jsonb where id=$1", [uid, JSON.stringify(list.filter(x => x !== hsh))]); ok = true; }
+    }
+  }
+  if (ok) tfFail.delete(uid); else { const n = f && Date.now() - f.t < 15 * 60e3 ? f.n + 1 : 1; tfFail.set(uid, { n, t: Date.now() }); }
+  return ok;
+};
 app.post("/api/auth/login", lim, wrap(async (req, res) => {
-  const { email, password } = req.body || {};
+  const { email, password, code } = req.body || {};
   const [u] = await q("select * from users where email=$1", [String(email || "").toLowerCase()]);
   if (!u || !(await bcrypt.compare(String(password || ""), u.password_hash))) throw E(401, "wrong email or password");
-  setCookie(res, u.id); const { password_hash, ...pub } = u; res.json(pub);
+  if (u.totp_enabled) {
+    if (!code) return res.json({ need_2fa: true });
+    if (!(await twofaCheck(u.id, code))) throw E(401, "wrong 2fa code");
+  }
+  setCookie(res, u.id); const { password_hash, totp_secret, totp_backup, totp_enabled, totp_last_step, ...pub } = u; res.json(pub);
 }));
 app.post("/api/auth/logout", (req, res) => { if (req.user) { subs.get(req.user.id)?.forEach(r => r.end()); subs.delete(req.user.id); lastSeen.delete(req.user.id); } res.clearCookie("t").json({ ok: true }); });
 app.get("/api/me", need, wrap(async (req, res) => { const [u] = await q(`select ${U},show_badges,blocked_until,block_reason,block_hours from users where id=$1`, [req.user.id]); u ? res.json(u) : res.status(401).json({ error: "auth required" }); }));
@@ -87,6 +109,7 @@ const r4 = routes4(app, { q, pool, tx, E, wrap, need, pushUser, hooks, L: { LCOL
 routes5(app, { q, pool, tx, E, wrap, need, hooks, pushUser });
 routes6(app, { q, pool, tx, E, wrap, need, hooks, pushUser });
 routes7(app, { q, pool, tx, E, wrap, need, hooks, pushUser });
+routes9(app, { q, E, wrap, need, twofaCheck });
 routes8(app, { q, pool, tx, E, wrap, need, hooks, pushUser, online: uid => online(uid), notifyStaff: t => r2.notifyStaff?.(t) });
 app.get("/api/listings", wrap(async (req, res) => {
   const { game, category, min, max, q: s, seller, sort, offset } = req.query, w = ["l.status='active'"], p = [];

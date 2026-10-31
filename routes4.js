@@ -5,7 +5,7 @@ export const CODE_RULES = [
   { key: "on_time", title: "Выдавать в срок", text: "Выдавать товар в срок, который указан в объявлении." },
   { key: "polite", title: "Отвечать вежливо", text: "Отвечать покупателям уважительно, без грубости и давления." }
 ];
-import bcrypt from "bcryptjs"; import crypto from "crypto"; import rateLimit from "express-rate-limit";
+import { sendMail, mailConfigured } from "./mailer.js"; import bcrypt from "bcryptjs"; import crypto from "crypto"; import rateLimit from "express-rate-limit";
 export default function routes4(app, { q, pool, tx, E, wrap, need, pushUser, L, hooks = {}, setCookie }) {
   const ST = ["moderator", "admin", "owner"], AD = ["admin", "owner"];
   const staff = (...r) => wrap(async (req, _res, next) => { const [u] = await q("select role from users where id=$1", [req.user.id]); if (!u || !r.includes(u.role)) throw E(403, "forbidden"); req.role = u.role; next(); });
@@ -231,16 +231,23 @@ export default function routes4(app, { q, pool, tx, E, wrap, need, pushUser, L, 
   const h = c => crypto.createHash("sha256").update(String(c)).digest("hex");
   const mkCode = () => crypto.randomBytes(5).toString("hex").toUpperCase();
   const rl = rateLimit({ windowMs: 15 * 60e3, limit: 10 });
-  app.get("/api/auth/reset/info", wrap(async (_req, res) => res.json({ telegram: !!process.env.TELEGRAM_BOT_TOKEN })));
+  app.get("/api/auth/reset/info", wrap(async (_req, res) => res.json({ email: mailConfigured(), telegram: !!process.env.TELEGRAM_BOT_TOKEN })));
   app.post("/api/auth/reset/request", rl, wrap(async (req, res) => {
     const email = String(req.body?.email || "").trim().toLowerCase();
-    const [u] = email ? await q("select id,telegram_id from users where email=$1", [email]) : [];
-    let sent = false;
-    if (u?.telegram_id && process.env.TELEGRAM_BOT_TOKEN && hooks.tgSend) {
-      const [last] = await q("select created_at from pw_resets where user_id=$1 and kind='telegram' order by created_at desc limit 1", [u.id]);
+    const [u] = email ? await q("select id,email,telegram_id from users where email=$1", [email]) : [];
+    if (u) {
+      const [last] = await q("select created_at from pw_resets where user_id=$1 and kind in ('email','telegram') order by created_at desc limit 1", [u.id]);
       if (!last || Date.now() - new Date(last.created_at).getTime() > 60e3) {
-        const code = mkCode(); await q("insert into pw_resets(user_id,code_hash,kind,expires_at) values($1,$2,'telegram',now()+interval '15 minutes')", [u.id, h(code)]);
-        try { await hooks.tgSend(u.telegram_id, `Код для сброса пароля DonutPay: ${code}\nДействует 15 минут. Если это были не вы, просто проигнорируйте сообщение.`); sent = true; } catch {}
+        if (mailConfigured()) {
+          const code = String(crypto.randomInt(0, 1e6)).padStart(6, "0");
+          await q("update pw_resets set used_at=now() where user_id=$1 and used_at is null", [u.id]);
+          await q("insert into pw_resets(user_id,code_hash,kind,expires_at) values($1,$2,'email',now()+interval '15 minutes')", [u.id, h(code)]);
+          try { await sendMail({ to: u.email, subject: "Код для сброса пароля DonutPay", text: `Ваш код для сброса пароля DonutPay: ${code}\n\nКод действует 15 минут. Если вы не запрашивали сброс, просто проигнорируйте это письмо: пароль не изменится.` }); }
+          catch (e) { console.error("[mail] reset send failed:", e.message); }
+        } else if (u.telegram_id && process.env.TELEGRAM_BOT_TOKEN && hooks.tgSend) {
+          const code = mkCode(); await q("insert into pw_resets(user_id,code_hash,kind,expires_at) values($1,$2,'telegram',now()+interval '15 minutes')", [u.id, h(code)]);
+          try { await hooks.tgSend(u.telegram_id, `Код для сброса пароля DonutPay: ${code}\nДействует 15 минут. Если это были не вы, просто проигнорируйте сообщение.`); } catch {}
+        }
       }
     }
     res.json({ ok: true }); // ответ одинаковый, чтобы нельзя было перебирать почты
@@ -264,7 +271,8 @@ export default function routes4(app, { q, pool, tx, E, wrap, need, pushUser, L, 
   // ---- публичные настройки: документы и контакты поддержки
   app.get("/api/site-config", (_req, res) => {
     const e = process.env;
-    res.json({ privacy_url: e.PRIVACY_URL || "https://telegra.ph/POLITIKA-KONFIDENCIALNOSTI-08-12-99", terms_url: e.TERMS_URL || "https://telegra.ph/PUBLICHNAYA-OFERTA-08-12-15", support_tg: (e.SUPPORT_TG || "").replace(/^@/, "").trim(), support_email: (e.SUPPORT_EMAIL || "").trim() });
+    const ch = (e.TG_CHANNEL || "").trim(), chu = !ch ? "" : /^https?:\/\//i.test(ch) ? ch : "https://t.me/" + ch.replace(/^@/, "").replace(/^t\.me\//, "");
+    res.json({ privacy_url: (e.PRIVACY_URL || "").trim(), terms_url: (e.TERMS_URL || "").trim(), support_tg: (e.SUPPORT_TG || "").replace(/^@/, "").trim(), support_email: (e.SUPPORT_EMAIL || "").trim(), channel: chu, operator: (e.OPERATOR_NAME || "").trim(), operator_info: (e.OPERATOR_INFO || "").trim(), law: (e.OPERATOR_LAW || "").trim() });
   });
   // ---- закреплённый выгодный продавец в игре/категории: выбирается автоматически и меняется каждые PIN_HOURS часов
   app.get("/api/pins", wrap(async (req, res) => {

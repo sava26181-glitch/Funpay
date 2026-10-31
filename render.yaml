@@ -13,3 +13,17 @@ services:
         sync: false
       - key: JWT_SECRET
         generateValue: true
+      - key: MAIL_FROM
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: TG_CHANNEL
+        sync: false
+      - key: SUPPORT_EMAIL
+        sync: false
+      - key: SUPPORT_TG
+        sync: false
+      - key: OPERATOR_NAME
+        sync: false
+      - key: OPERATOR_INFO
+        sync: false
